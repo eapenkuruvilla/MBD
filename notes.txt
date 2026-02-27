@@ -96,3 +96,5 @@ curl -s -X POST "http://localhost:5601/api/data_views/data_view" -H "kbn-xsrf: t
  # Re-import when Kibana is running:
   curl -s -X POST "http://localhost:5601/api/saved_objects/_import?overwrite=true"  -H "kbn-xsrf: true" -F file=@elk/kibana/dashboard.ndjson
 
+  # Option 1: re-run the setup container
+  docker-compose up --force-recreate setup
