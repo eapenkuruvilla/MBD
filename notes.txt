@@ -92,3 +92,8 @@ curl -s -X POST "http://localhost:5601/api/data_views/data_view" -H "kbn-xsrf: t
   curl -X DELETE "http://localhost:9200/mbd-misbehaviors-*"
   # 4. Start Logstash again
   docker compose start logstash
+
+ # Re-import when Kibana is running:
+
+  curl -s -X POST "http://localhost:5601/api/saved_objects/_import?overwrite=true"  -H "kbn-xsrf: true" -F file=@elk/kibana/dashboard.ndjson
+
