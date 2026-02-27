@@ -15,11 +15,13 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+from detectors import accel as accel_detector
 from detectors import speed as speed_detector
 
 # Register detectors here as more are added.
 DETECTORS = [
     speed_detector,
+    accel_detector,
 ]
 
 LAT_SCALE = 1e-7   # BSM lat/long are integers × 1e-7 degrees

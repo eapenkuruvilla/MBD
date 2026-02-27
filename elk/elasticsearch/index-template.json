@@ -19,7 +19,11 @@
         "misbehavior":         { "type": "keyword" },
         "speed_mph":           { "type": "float" },
         "threshold_mph":       { "type": "float" },
-        "speed_raw":           { "type": "integer" }
+        "speed_raw":           { "type": "integer" },
+        "accel_g":             { "type": "float" },
+        "accel_ms2":           { "type": "float" },
+        "threshold_g":         { "type": "float" },
+        "accel_raw":           { "type": "integer" }
       }
     }
   }

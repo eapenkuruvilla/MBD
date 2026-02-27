@@ -1,4 +1,9 @@
-  logs/misbehaviors.log → Logstash → Elasticsearch → report.py ✓                                                    
+  docker compose down
+  python detector.py
+  docker compose up -d
+  http://localhost:5601 — open it, go to Dashboards, and select MBD Misbehavior Report
+
+  logs/misbehaviors.log → Logstash → Elasticsearch → report.py ✓
                                                    → Kibana dashboard ✓                                          
                                                                                                                     
   Results:                                                                                                          
@@ -44,8 +49,8 @@ docker compose rm -sf filebeat && docker compose up -d filebeat
   curl -s http://localhost:9200/mbd-misbehaviors-*/_count
 
   # Stop everything and restart (Filebeat container will be removed automatically)                                  
+  docker compose up -d
   docker compose down
-  docker compose up -d   
 
   # Watch Logstash come up — takes ~60s                                                                          
   docker compose logs -f logstash | grep -E "Pipeline|pipeline|misbehavior|error|Error"
@@ -75,4 +80,15 @@ docker compose rm -sf filebeat && docker compose up -d filebeat
 
                                            
                                                                         
+curl -s -X DELETE "http://localhost:5601/api/saved_objects/index-pattern/mbd-data-view"     -H "kbn-xsrf: true"
 
+curl -s -X POST "http://localhost:5601/api/data_views/data_view" -H "kbn-xsrf: true" -H "Content-Type:            application/json" -d '{"data_view":{"id":"mbd-data-view","title":"mbd-misbehaviors-*","timeFieldName":"detected_at","name":"MBD        Misbehaviors"}}' 
+
+● # 1. Stop Logstash
+  docker compose stop logstash
+  # 2. Clear sincedb so Logstash re-reads the log file from the start
+  docker compose run --rm logstash rm /usr/share/logstash/data/sincedb_misbehaviors
+  # 3. Delete the existing indices so they are recreated with the correct mapping
+  curl -X DELETE "http://localhost:9200/mbd-misbehaviors-*"
+  # 4. Start Logstash again
+  docker compose start logstash
