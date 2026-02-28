@@ -55,12 +55,13 @@ curl -X DELETE http://localhost:9200/mbd-misbehaviors-2026.02.27
 ##############  KIBANA  ##############
 # View dashboard
 http://localhost:5601 — open it, go to Dashboards, and select MBD Misbehavior Repor
-# Delete and recreate data
+# Delete data
 curl -s -X DELETE "http://localhost:5601/api/saved_objects/index-pattern/mbd-data-view" -H "kbn-xsrf: true"
-curl -s -X POST "http://localhost:5601/api/data_views/data_view" -H "kbn-xsrf: true" -H "Content-Type: application/json" -d '{"data_view":{"id":"mbd-data-view","title":"mbd-misbehaviors-*","timeFieldName":"detected_at","name":"MBD Misbehaviors"}}'
 # Re-import dashboad when Kibana is running:
 curl -s -X POST "http://localhost:5601/api/saved_objects/_import?overwrite=true"  -H "kbn-xsrf: true" -F file=@elk/kibana/dashboard.ndjson
+curl -s -X POST "http://localhost:5601/api/saved_objects/_import?overwrite=true" -H "kbn-xsrf: true" -F file=@elk/kibana/kpi-vega.ndjson | python3 -m json.tool
 curl -s -X POST "http://localhost:5601/api/saved_objects/_import?overwrite=true"  -H "kbn-xsrf: true"  -F file=@elk/kibana/dashboard.ndjson | python3 -m json.tool
+
 
 
 

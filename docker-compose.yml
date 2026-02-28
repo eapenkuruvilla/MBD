@@ -62,6 +62,7 @@ services:
     volumes:
       - ./elk/setup.sh:/setup/setup.sh:ro
       - ./elk/elasticsearch/index-template.json:/setup/index-template.json:ro
+      - ./elk/kibana/kpi-vega.ndjson:/setup/kpi-vega.ndjson:ro
       - ./elk/kibana/dashboard.ndjson:/setup/dashboard.ndjson:ro
     entrypoint: ["sh", "-c", "apk add --no-cache curl && sh /setup/setup.sh"]
     depends_on:

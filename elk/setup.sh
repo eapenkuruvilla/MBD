@@ -42,6 +42,13 @@ until curl -s -o /dev/null -w "%{http_code}" \
 done
 echo "[setup] Kibana is up."
 
+# ── Import KPI Vega visualizations first (must exist before dashboard import) ─
+echo "[setup] Importing KPI Vega visualizations..."
+code=$(curl_json POST "$KB/api/saved_objects/_import?overwrite=true" \
+  -H "kbn-xsrf: true" \
+  -F file=@/setup/kpi-vega.ndjson)
+echo "[setup] KPI Vega response (HTTP $code): $(cat /tmp/resp.txt)"
+
 # ── Import dashboard (fatal) ──────────────────────────────────────────────────
 echo "[setup] Importing Kibana dashboard..."
 code=$(curl_json POST "$KB/api/saved_objects/_import?overwrite=true" \
