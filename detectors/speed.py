@@ -5,16 +5,16 @@ BSM speed field (coreData.speed) is encoded per SAE J2735:
   - Unit: 0.02 m/s per LSB
   - Range: 0–8190 (8191 = unavailable)
 
-70 mph = 31.2928 m/s → 1564.64 units → flag when raw value > 1564
+120 km/h = 33.333 m/s → 1666.67 units → flag when raw value > 1666
 """
 
 from typing import Optional
 
 SPEED_UNIT_MS = 0.02          # m/s per LSB
-MS_TO_MPH = 2.23694
+MS_TO_KMH = 3.6
 SPEED_UNAVAILABLE = 8191
-THRESHOLD_MPH = 70.0
-THRESHOLD_RAW = THRESHOLD_MPH / (SPEED_UNIT_MS * MS_TO_MPH)  # ~1564.64
+THRESHOLD_KMH = 120.0
+THRESHOLD_RAW = THRESHOLD_KMH / (SPEED_UNIT_MS * MS_TO_KMH)  # ~1666.67
 
 
 def check(bsm: dict) -> Optional[dict]:
@@ -35,14 +35,14 @@ def check(bsm: dict) -> Optional[dict]:
     if raw == SPEED_UNAVAILABLE:
         return None
 
-    speed_mph = raw * SPEED_UNIT_MS * MS_TO_MPH
+    speed_kmh = raw * SPEED_UNIT_MS * MS_TO_KMH
 
-    if speed_mph <= THRESHOLD_MPH:
+    if speed_kmh <= THRESHOLD_KMH:
         return None
 
     return {
         "misbehavior": "speed_exceeded",
-        "speed_mph": round(speed_mph, 2),
-        "threshold_mph": THRESHOLD_MPH,
+        "speed_kmh": round(speed_kmh, 2),
+        "threshold_kmh": THRESHOLD_KMH,
         "speed_raw": raw,
     }

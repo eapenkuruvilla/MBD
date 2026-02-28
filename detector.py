@@ -19,11 +19,15 @@ from pathlib import Path
 
 from detectors import accel as accel_detector
 from detectors import speed as speed_detector
+from detectors.position_jump import PositionJumpDetector
 
 # Register detectors here as more are added.
+# Module-level detectors (stateless) and class instances (stateful) both work
+# because detector.check(bsm) resolves to the module function or instance method.
 DETECTORS = [
     speed_detector,
     accel_detector,
+    PositionJumpDetector(),
 ]
 
 LAT_SCALE = 1e-7   # BSM lat/long are integers × 1e-7 degrees

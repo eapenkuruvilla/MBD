@@ -1,5 +1,5 @@
 {
-  "index_patterns": ["mbd-misbehaviors-*"],
+  "index_patterns": ["mbd-misbehaviors", "mbd-misbehaviors-*"],
   "priority": 100,
   "template": {
     "settings": {
@@ -17,13 +17,18 @@
         "msg_cnt":             { "type": "keyword" },
         "location":            { "type": "geo_point" },
         "misbehavior":         { "type": "keyword" },
-        "speed_mph":           { "type": "float" },
-        "threshold_mph":       { "type": "float" },
+        "speed_kmh":           { "type": "float" },
+        "threshold_kmh":       { "type": "float" },
         "speed_raw":           { "type": "integer" },
         "accel_g":             { "type": "float" },
         "accel_ms2":           { "type": "float" },
         "threshold_g":         { "type": "float" },
-        "accel_raw":           { "type": "integer" }
+        "accel_raw":           { "type": "integer" },
+        "jump_m":              { "type": "float" },
+        "elapsed_s":           { "type": "float" },
+        "implied_speed_kmh":   { "type": "float" },
+        "prev_lat":            { "type": "float" },
+        "prev_lon":            { "type": "float" }
       }
     }
   }

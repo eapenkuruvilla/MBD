@@ -126,3 +126,44 @@ curl -s -X POST "http://localhost:5601/api/data_views/data_view" -H "kbn-xsrf: t
   docker-compose restart logstash
 
   curl http://localhost:9200/mbd-misbehaviors-*/_count
+
+  The detector is ready. To push to Kibana, apply the updated index template and restart Logstash:
+  curl -X PUT http://localhost:9200/_index_template/mbd-misbehaviors  -H "Content-Type: application/json" -d @elk/elasticsearch/index-template.json
+  docker-compose restart logstash
+
+    # Delete all stale dated indices
+  curl -X DELETE http://localhost:9200/mbd-misbehaviors-2026.02.27
+  curl -X DELETE http://localhost:9200/mbd-misbehaviors-2026.02.28
+
+  # Re-apply the updated index template
+  curl -X PUT http://localhost:9200/_index_template/mbd-misbehaviors  -H "Content-Type: application/json" -d @elk/elasticsearch/index-template.json
+
+  # Re-import the dashboard (data view title changed)
+  curl -s -X POST "http://localhost:5601/api/saved_objects/_import?overwrite=true"  -H "kbn-xsrf: true" -F file=@elk/kibana/dashboard.ndjson
+
+  # Restart Logstash to pick up the new pipeline config
+  docker-compose restart logstash
+
+  To deploy, re-apply the template and restart everything:
+
+  curl -X PUT http://localhost:9200/_index_template/mbd-misbehaviors   -H "Content-Type: application/json" -d @elk/elasticsearch/index-template.json
+
+  curl -X DELETE http://localhost:9200/mbd-misbehaviors
+
+  curl -s -X POST "http://localhost:5601/api/saved_objects/_import?overwrite=true"   -H "kbn-xsrf: true" -F file=@elk/kibana/dashboard.ndjson
+
+  docker-compose restart logstash
+  Wait ~20 seconds for it to re-read the log, then verify:
+  curl http://localhost:9200/mbd-misbehaviors/_count
+
+  Also confirm Logstash has actually re-indexed the new data:
+  curl http://localhost:9200/mbd-misbehaviors/_count
+  curl http://localhost:9200/mbd-misbehaviors/_mapping | python3 -m json.tool | grep -E "speed|threshold"
+
+● Use the API to force a field list refresh — it's one curl command:
+  curl -X POST "http://localhost:5601/api/data_views/data_view/mbd-data-view/fields"   -H "kbn-xsrf: true"
+
+  If that doesn't work, the fallback is to delete the data view and re-import — the dashboard will recreate it with the
+  correct field list:
+  curl -X DELETE "http://localhost:5601/api/saved_objects/index-pattern/mbd-data-view"  -H "kbn-xsrf: true"
+  curl -s -X POST "http://localhost:5601/api/saved_objects/_import?overwrite=true"   -H "kbn-xsrf: true" -F file=@elk/kibana/dashboard.ndjson
