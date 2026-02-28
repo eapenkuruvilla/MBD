@@ -19,6 +19,7 @@ from pathlib import Path
 
 from detectors import accel as accel_detector
 from detectors import speed as speed_detector
+from detectors.heading_inconsistency import HeadingInconsistencyDetector
 from detectors.position_jump import PositionJumpDetector
 
 # Register detectors here as more are added.
@@ -28,6 +29,7 @@ DETECTORS = [
     speed_detector,
     accel_detector,
     PositionJumpDetector(),
+    HeadingInconsistencyDetector(),
 ]
 
 LAT_SCALE = 1e-7   # BSM lat/long are integers × 1e-7 degrees

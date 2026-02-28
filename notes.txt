@@ -1,24 +1,72 @@
-  docker compose down
-  python detector.py
-  docker compose up -d
-  http://localhost:5601 — open it, go to Dashboards, and select MBD Misbehavior Report
-
-  Going forward, the workflow is simple: run detector.py, then docker-compose restart logstash — Logstash always reads the
-  full log fresh, and the stable event_id ensures ES stays at exactly 13 documents no matter how many times you re-run.
-
-  logs/misbehaviors.log → Logstash → Elasticsearch → report.py ✓
-                                                   → Kibana dashboard ✓                                          
-                                                                                                                    
-  Results:                                                                                                          
-  - 41 events indexed, all speed_exceeded
-  - 4 vehicles: 8846042 (18), 8449898 (14), 8603792 (8), 8878244 (1)
-  - All from RSU thea13
-  - Speed range: 70.1 – 77.7 mph, avg 73.4 mph
-
-  Kibana dashboard is live at http://localhost:5601 — open it, go to Dashboards, and select MBD Misbehavior Report
-  to see the 4 Lens visualizations (timeline, top vehicles bar chart, misbehavior type donut, speed histogram).
+##############  WORK FlOW  ##############
+logs/misbehaviors.log → Logstash → Elasticsearch → report.py → Kibana dashboard
+# Regenerate the log
+python detector.py data/<bsm_file>
+# Restart Logstash to re-index
+docker compose restart logstash
+# Re-import the updated dashboard
+curl -s -X POST "http://localhost:5601/api/saved_objects/_import?overwrite=true" -H "kbn-xsrf: true" -F file=@elk/kibana/dashboard.ndjson
 
 
+##############  ELK STACK  ##############
+docker compose down
+docker compose up -d
+# Force recreate
+docker-compose up --force-recreate setup
+
+##############  FILEBEAT  ##############
+# Recreate Filebeat (new config + clean registry)
+docker compose rm -sf filebeat && docker compose up -d filebeat
+# Restart Filebeat
+docker compose restart filebeat
+
+##############  LOGSTASH ####### #######
+# Stop Logstash
+docker compose stop logstash
+# Start Logstash
+docker compose start logstash
+# Restart Logstash
+docker compose restart logstash
+# Confirm Logstash is ready
+curl -s http://localhost:9600/ | python3 -m json.tool | grep status
+# Watch Logstash come up — takes ~60s
+docker compose logs -f logstash | grep -E "Pipeline|pipeline|misbehavior|error|Error"
+# Clear the Logstash data
+docker volume rm mbd_logstash_data
+docker compose run --rm logstash rm /usr/share/logstash/data/sincedb_misbehaviors
+docker exec mbd-logstash rm -f /usr/share/logstash/data/sincedb_misbehaviors
+
+
+##############  ELASTIC SEARCH  ##############
+# 1. Delete the data
+curl -X DELETE http://localhost:9200/mbd-misbehaviors-2026.02.27
+# Update the ES index template
+curl -X PUT http://localhost:9200/_index_template/mbd-misbehaviors  -H "Content-Type: application/json"   -d @elk/elasticsearch/index-template.json
+# Delete the existing indices so they are recreated with the correct mapping
+curl -X DELETE "http://localhost:9200/mbd-misbehaviors-*"
+# Query data
+curl -s http://localhost:9200/mbd-misbehaviors-*/_count
+# List the index name
+curl http://localhost:9200/_cat/indices?v
+# Then delete by exact name, e.g.:
+curl -X DELETE http://localhost:9200/mbd-misbehaviors-2026.02.27
+
+
+##############  KIBANA  ##############
+# View dashboard
+http://localhost:5601 — open it, go to Dashboards, and select MBD Misbehavior Repor
+# Delete and recreate data
+curl -s -X DELETE "http://localhost:5601/api/saved_objects/index-pattern/mbd-data-view" -H "kbn-xsrf: true"
+curl -s -X POST "http://localhost:5601/api/data_views/data_view" -H "kbn-xsrf: true" -H "Content-Type: application/json" -d '{"data_view":{"id":"mbd-data-view","title":"mbd-misbehaviors-*","timeFieldName":"detected_at","name":"MBD Misbehaviors"}}'
+# Re-import dashboad when Kibana is running:
+curl -s -X POST "http://localhost:5601/api/saved_objects/_import?overwrite=true"  -H "kbn-xsrf: true" -F file=@elk/kibana/dashboard.ndjson
+curl -s -X POST "http://localhost:5601/api/saved_objects/_import?overwrite=true"  -H "kbn-xsrf: true"  -F file=@elk/kibana/dashboard.ndjson | python3 -m json.tool
+
+
+
+
+
+#####################################
 docker compose up -d
 docker compose up -d && docker compose logs -f setup
 pip install -r requirements.txt
@@ -33,23 +81,8 @@ docker compose rm -sf filebeat && docker compose up -d filebeat
   sleep 10
   curl -s http://localhost:9200/mbd-misbehaviors-*/_count
 
-# 1. Update the ES index template                                                                                 
-  curl -X PUT http://localhost:9200/_index_template/mbd-misbehaviors \
-    -H "Content-Type: application/json" \                                                                           
-    -d @elk/elasticsearch/index-template.json 
 
-  docker compose restart logstash
 
-  # 3. Recreate Filebeat (new config + clean registry)
-  docker compose rm -sf filebeat && docker compose up -d filebeat
-                                                                  
-  # Confirm Logstash is ready
-  curl -s http://localhost:9600/ | python3 -m json.tool | grep status    
-
-  # Then reconnect Filebeat                                                                                      
-  docker compose restart filebeat
-  sleep 30
-  curl -s http://localhost:9200/mbd-misbehaviors-*/_count
 
   # Stop everything and restart (Filebeat container will be removed automatically)                                  
   docker compose up -d
@@ -64,11 +97,10 @@ docker compose rm -sf filebeat && docker compose up -d filebeat
   curl -s http://localhost:9600/ | python3 -m json.tool | grep status
   curl -s http://localhost:9200/mbd-misbehaviors-*/_count
 
-  # 1. Delete the bad index (wrong 'date' mapping for record_generated_at)
-  curl -X DELETE http://localhost:9200/mbd-misbehaviors-2026.02.27
 
-  # 2. Clear the sincedb so Logstash re-reads the file from the start
-  docker volume rm mbd_logstash_data    # wipes sincedb; name may be "mbd_logstash_data" or the dir prefix of your
+
+
+  # wipes sincedb; name may be "mbd_logstash_data" or the dir prefix of your
   project
 
   # 3. Full restart
@@ -83,63 +115,32 @@ docker compose rm -sf filebeat && docker compose up -d filebeat
 
                                            
                                                                         
-curl -s -X DELETE "http://localhost:5601/api/saved_objects/index-pattern/mbd-data-view"     -H "kbn-xsrf: true"
 
-curl -s -X POST "http://localhost:5601/api/data_views/data_view" -H "kbn-xsrf: true" -H "Content-Type:            application/json" -d '{"data_view":{"id":"mbd-data-view","title":"mbd-misbehaviors-*","timeFieldName":"detected_at","name":"MBD        Misbehaviors"}}' 
 
-● # 1. Stop Logstash
-  docker compose stop logstash
-  # 2. Clear sincedb so Logstash re-reads the log file from the start
-  docker compose run --rm logstash rm /usr/share/logstash/data/sincedb_misbehaviors
-  # 3. Delete the existing indices so they are recreated with the correct mapping
-  curl -X DELETE "http://localhost:9200/mbd-misbehaviors-*"
-  # 4. Start Logstash again
-  docker compose start logstash
 
- # Re-import when Kibana is running:
-  curl -s -X POST "http://localhost:5601/api/saved_objects/_import?overwrite=true"  -H "kbn-xsrf: true" -F file=@elk/kibana/dashboard.ndjson
 
-  # Option 1: re-run the setup container
-  docker-compose up --force-recreate setup
 
-    # Delete the stale index
-  # List the index name
-  curl http://localhost:9200/_cat/indices?v
 
-  # Then delete by exact name, e.g.:
-  curl -X DELETE http://localhost:9200/mbd-misbehaviors-2026.02.27
 
-    # Clear Logstash sincedb so it re-reads the log
-  docker exec mbd-logstash rm -f /usr/share/logstash/data/sincedb_misbehaviors
-  docker-compose restart logstash
+
+
 
   # 1. Regenerate the log (now includes event_id)
   python detector.py data/usdot-its-cvpilot-bsm-public-0-2020-05-06-07-00-00-0d434b66-b015-48f8-837e-3cee23013c19.json
 
-  # 2. Delete the stale single document in ES
-  curl -X DELETE http://localhost:9200/mbd-misbehaviors-2026.02.27
 
-  # 3. Clear sincedb so Logstash re-reads the new log
-  docker exec mbd-logstash rm -f /usr/share/logstash/data/sincedb_misbehaviors
 
-  # 4. Restart Logstash
-  docker-compose restart logstash
+
 
   curl http://localhost:9200/mbd-misbehaviors-*/_count
 
-  The detector is ready. To push to Kibana, apply the updated index template and restart Logstash:
-  curl -X PUT http://localhost:9200/_index_template/mbd-misbehaviors  -H "Content-Type: application/json" -d @elk/elasticsearch/index-template.json
-  docker-compose restart logstash
+
 
     # Delete all stale dated indices
   curl -X DELETE http://localhost:9200/mbd-misbehaviors-2026.02.27
   curl -X DELETE http://localhost:9200/mbd-misbehaviors-2026.02.28
 
-  # Re-apply the updated index template
-  curl -X PUT http://localhost:9200/_index_template/mbd-misbehaviors  -H "Content-Type: application/json" -d @elk/elasticsearch/index-template.json
 
-  # Re-import the dashboard (data view title changed)
-  curl -s -X POST "http://localhost:5601/api/saved_objects/_import?overwrite=true"  -H "kbn-xsrf: true" -F file=@elk/kibana/dashboard.ndjson
 
   # Restart Logstash to pick up the new pipeline config
   docker-compose restart logstash
@@ -163,7 +164,3 @@ curl -s -X POST "http://localhost:5601/api/data_views/data_view" -H "kbn-xsrf: t
 ● Use the API to force a field list refresh — it's one curl command:
   curl -X POST "http://localhost:5601/api/data_views/data_view/mbd-data-view/fields"   -H "kbn-xsrf: true"
 
-  If that doesn't work, the fallback is to delete the data view and re-import — the dashboard will recreate it with the
-  correct field list:
-  curl -X DELETE "http://localhost:5601/api/saved_objects/index-pattern/mbd-data-view"  -H "kbn-xsrf: true"
-  curl -s -X POST "http://localhost:5601/api/saved_objects/_import?overwrite=true"   -H "kbn-xsrf: true" -F file=@elk/kibana/dashboard.ndjson

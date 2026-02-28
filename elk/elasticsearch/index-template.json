@@ -28,7 +28,12 @@
         "elapsed_s":           { "type": "float" },
         "implied_speed_kmh":   { "type": "float" },
         "prev_lat":            { "type": "float" },
-        "prev_lon":            { "type": "float" }
+        "prev_lon":            { "type": "float" },
+        "reported_heading":    { "type": "float" },
+        "gps_bearing":         { "type": "float" },
+        "heading_diff":        { "type": "float" },
+        "threshold_deg":       { "type": "float" },
+        "distance_m":          { "type": "float" }
       }
     }
   }
