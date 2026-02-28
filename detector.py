@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from detectors import accel as accel_detector
+from detectors import brakes_inconsistency as brakes_detector
 from detectors import speed as speed_detector
 from detectors.heading_inconsistency import HeadingInconsistencyDetector
 from detectors.position_jump import PositionJumpDetector
@@ -28,6 +29,7 @@ from detectors.position_jump import PositionJumpDetector
 DETECTORS = [
     speed_detector,
     accel_detector,
+    brakes_detector,
     PositionJumpDetector(),
     HeadingInconsistencyDetector(),
 ]

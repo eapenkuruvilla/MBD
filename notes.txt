@@ -5,7 +5,8 @@ python detector.py data/<bsm_file>
 # Restart Logstash to re-index
 docker compose restart logstash
 # Re-import the updated dashboard
-curl -s -X POST "http://localhost:5601/api/saved_objects/_import?overwrite=true" -H "kbn-xsrf: true" -F file=@elk/kibana/dashboard.ndjson
+curl -s -X POST "http://localhost:5601/api/saved_objects/_import?overwrite=true" -H "kbn-xsrf: true" -F file=@elk/kibana/kpi-vega.ndjson | python3 -m json.tool
+curl -s -X POST "http://localhost:5601/api/saved_objects/_import?overwrite=true" -H "kbn-xsrf: true" -F file=@elk/kibana/dashboard.ndjson | python3 -m json.tool
 
 
 ##############  ELK STACK  ##############
