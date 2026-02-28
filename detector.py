@@ -20,8 +20,12 @@ from pathlib import Path
 from detectors import accel as accel_detector
 from detectors import brakes_inconsistency as brakes_detector
 from detectors import speed as speed_detector
+from detectors.heading_change_rate import HeadingChangeRateDetector
 from detectors.heading_inconsistency import HeadingInconsistencyDetector
 from detectors.position_jump import PositionJumpDetector
+from detectors.speed_accel_consistency import SpeedAccelConsistencyDetector
+from detectors.speed_position_consistency import SpeedPositionConsistencyDetector
+from detectors.yaw_rate_consistency import YawRateConsistencyDetector
 
 # Register detectors here as more are added.
 # Module-level detectors (stateless) and class instances (stateful) both work
@@ -32,6 +36,10 @@ DETECTORS = [
     brakes_detector,
     PositionJumpDetector(),
     HeadingInconsistencyDetector(),
+    SpeedPositionConsistencyDetector(),
+    SpeedAccelConsistencyDetector(),
+    HeadingChangeRateDetector(),
+    YawRateConsistencyDetector(),
 ]
 
 LAT_SCALE = 1e-7   # BSM lat/long are integers × 1e-7 degrees
