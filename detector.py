@@ -10,6 +10,7 @@ Usage:
 """
 
 import argparse
+import hashlib
 import json
 import math
 import sys
@@ -153,8 +154,12 @@ def process_file(bsm_path: Path, log_path: Path):
 
                 cooldown[key] = (lat, lon, bsm_time)
 
+                event_id = hashlib.sha1(
+                    f"{context['vehicle_id']}|{context['record_generated_at']}|{result['misbehavior']}".encode()
+                ).hexdigest()[:16]
                 log_entry = {
                     "detected_at": datetime.now(timezone.utc).isoformat(),
+                    "event_id": event_id,
                     **context,
                     **result,
                 }
