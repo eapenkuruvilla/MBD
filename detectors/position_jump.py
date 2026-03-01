@@ -14,55 +14,21 @@ MAX_GAP_SECONDS    :  60  — gaps longer than this are skipped; the vehicle
                             may have legitimately reappeared elsewhere
 """
 
-import math
-from datetime import datetime
 from typing import Optional
 
-LAT_SCALE  = 1e-7
-LON_SCALE  = 1e-7
-MS_TO_KMH  = 3.6           # m/s → km/h
+from .utils import _haversine_m, _parse_time, BaseDetector, LAT_SCALE, LON_SCALE, MS_TO_KMH
 
-MAX_JUMP_SPEED_KMH = 200.0  # km/h — implied speed must exceed this
-MIN_JUMP_METERS    = 500.0   # m    — filters out GPS noise on tiny Δt
-MAX_GAP_SECONDS    = 1.0   # s    — ignore gaps longer than this
+MAX_JUMP_SPEED_KMH = 10.0  # km/h — implied speed must exceed this
+MIN_JUMP_METERS    = 100.0   # m    — filters out GPS noise on tiny Δt
+MAX_GAP_SECONDS    = 0.15   # s    — ignore gaps longer than this
 
 
-def _haversine_m(lat1, lon1, lat2, lon2):
-    R = 6_371_000
-    phi1, phi2 = math.radians(lat1), math.radians(lat2)
-    dphi = math.radians(lat2 - lat1)
-    dlam = math.radians(lon2 - lon1)
-    a = (math.sin(dphi / 2) ** 2
-         + math.cos(phi1) * math.cos(phi2) * math.sin(dlam / 2) ** 2)
-    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-
-
-def _parse_time(ts: str) -> Optional[datetime]:
-    if not ts:
-        return None
-    clean = ts.split("[")[0].strip()
-    for fmt in (
-        "%Y-%m-%d %H:%M:%S.%f",
-        "%Y-%m-%d %H:%M:%S",
-        "%Y-%m-%dT%H:%M:%S.%f",
-        "%Y-%m-%dT%H:%M:%S",
-    ):
-        try:
-            return datetime.strptime(clean, fmt)
-        except ValueError:
-            pass
-    try:
-        return datetime.fromisoformat(clean.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-
-
-class PositionJumpDetector:
+class PositionJumpDetector(BaseDetector):
     """Stateful detector — tracks the last known position per vehicle."""
 
     def __init__(self):
         # vehicle_id -> (lat, lon, datetime)
-        self._last: dict = {}
+        super().__init__()
 
     def check(self, bsm: dict) -> Optional[dict]:
         meta = bsm.get("metadata", {})

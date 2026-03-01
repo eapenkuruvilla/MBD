@@ -13,10 +13,9 @@ Threshold: 0.7 g  (1 g = 9.80665 m/s²)
 
 from typing import Optional
 
-ACCEL_UNIT_MS2 = 0.01          # m/s² per LSB
-G_MS2 = 9.80665                # standard gravity
-ACCEL_UNAVAILABLE = 2001
-THRESHOLD_G = 3.0
+from .utils import ACCEL_UNAVAILABLE, ACCEL_UNIT_MS2, G_MS2
+
+THRESHOLD_G = 1.0
 THRESHOLD_MS2 = THRESHOLD_G * G_MS2
 
 

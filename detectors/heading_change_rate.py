@@ -17,66 +17,26 @@ MAX_GAP_SECONDS        :  2.0  — gaps longer than this are skipped; a legitima
 MIN_DISTANCE_M         :  1.0  — require some displacement to rule out GPS jitter
 """
 
-import math
-from datetime import datetime
 from typing import Optional
 
-LAT_SCALE       = 1e-7
-LON_SCALE       = 1e-7
-HEADING_UNIT    = 0.0125    # degrees per LSB
-HEADING_UNAVAIL = 28800
-SPEED_UNIT_MS   = 0.02
-SPEED_UNAVAIL   = 8191
-MS_TO_KMH       = 3.6
+from .utils import (
+    _haversine_m, _angular_diff, _parse_time, BaseDetector,
+    LAT_SCALE, LON_SCALE, HEADING_UNIT, HEADING_UNAVAILABLE,
+    SPEED_UNIT_MS, SPEED_UNAVAILABLE, MS_TO_KMH,
+)
 
 MAX_HEADING_RATE_DEG_S = 90.0
-MIN_SPEED_KMH          = 200.0
-MAX_GAP_SECONDS        =  1.0
-MIN_DISTANCE_M         =  50.0
+MIN_SPEED_KMH          = 10.0  # About 1.0 g
+MAX_GAP_SECONDS        =  0.15
+MIN_DISTANCE_M         =  5.0
 
 
-def _haversine_m(lat1, lon1, lat2, lon2) -> float:
-    R = 6_371_000
-    phi1, phi2 = math.radians(lat1), math.radians(lat2)
-    dphi = math.radians(lat2 - lat1)
-    dlam = math.radians(lon2 - lon1)
-    a = (math.sin(dphi / 2) ** 2
-         + math.cos(phi1) * math.cos(phi2) * math.sin(dlam / 2) ** 2)
-    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-
-
-def _angular_diff(a: float, b: float) -> float:
-    """Smallest unsigned angular difference between two headings (0–180°)."""
-    diff = abs(a - b) % 360
-    return diff if diff <= 180 else 360 - diff
-
-
-def _parse_time(ts: str) -> Optional[datetime]:
-    if not ts:
-        return None
-    clean = ts.split("[")[0].strip()
-    for fmt in (
-        "%Y-%m-%d %H:%M:%S.%f",
-        "%Y-%m-%d %H:%M:%S",
-        "%Y-%m-%dT%H:%M:%S.%f",
-        "%Y-%m-%dT%H:%M:%S",
-    ):
-        try:
-            return datetime.strptime(clean, fmt)
-        except ValueError:
-            pass
-    try:
-        return datetime.fromisoformat(clean.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-
-
-class HeadingChangeRateDetector:
+class HeadingChangeRateDetector(BaseDetector):
     """Stateful detector — tracks last heading/position/time per vehicle."""
 
     def __init__(self):
         # vehicle_id -> (heading_deg, lat, lon, datetime)
-        self._last: dict = {}
+        super().__init__()
 
     def check(self, bsm: dict) -> Optional[dict]:
         meta = bsm.get("metadata", {})
@@ -100,7 +60,7 @@ class HeadingChangeRateDetector:
         except (ValueError, TypeError):
             return None
 
-        if hdg_raw == HEADING_UNAVAIL or spd_raw == SPEED_UNAVAIL:
+        if hdg_raw == HEADING_UNAVAILABLE or spd_raw == SPEED_UNAVAILABLE:
             return None
 
         heading_deg = hdg_raw * HEADING_UNIT

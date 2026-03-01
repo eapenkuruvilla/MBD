@@ -2,6 +2,7 @@
 logs/misbehaviors.log → Logstash → Elasticsearch → report.py → Kibana dashboard
 # Regenerate the log
 python detector.py data/<bsm_file>
+python manage_display_filter.py
 # Restart Logstash to re-index
 docker compose restart logstash
 # Re-import the updated dashboard
@@ -27,6 +28,8 @@ docker compose stop logstash
 docker compose start logstash
 # Restart Logstash
 docker compose restart logstash
+# Watch Logstash until it goes quiet (no more "indexed" messages)
+docker-compose logs -f logstash
 # Confirm Logstash is ready
 curl -s http://localhost:9600/ | python3 -m json.tool | grep status
 # Watch Logstash come up — takes ~60s
@@ -90,5 +93,106 @@ curl -s -X POST "http://localhost:5601/api/saved_objects/_import?overwrite=true"
   speed_accel_inconsistency          4
   speed_position_inconsistency     564
 
+  Edit thresholds.json           ← tune L2 thresholds (no re-ingestion)
+          ↓
+  python manage_display_filter.py
+          ↓
+  ES alias  mbd-display  updated (server-side, persistent)
+          ↓
+  Kibana → switch data view to  mbd-display  → analysts see filtered data
+          ↓ (optionally)
+  python manage_display_filter.py --setup-kibana
+          → adds 10 range-slider Controls to the existing dashboard
+             (Speed km/h · Acceleration g · Jump m · Heading diff ° · ...)
 
 
+  Step 1 — Start the ELK stack
+
+  docker-compose up -d
+
+  This starts four containers in dependency order:
+
+  ┌───────────────────┬────────────────────────────────────────────────────────────────────────────────────┐
+  │     Container     │                                        Role                                        │
+  ├───────────────────┼────────────────────────────────────────────────────────────────────────────────────┤
+  │ mbd-elasticsearch │ Stores and indexes the misbehavior events                                          │
+  ├───────────────────┼────────────────────────────────────────────────────────────────────────────────────┤
+  │ mbd-kibana        │ Dashboard UI                                                                       │
+  ├───────────────────┼────────────────────────────────────────────────────────────────────────────────────┤
+  │ mbd-setup         │ One-shot: applies ES template, creates mbd-display alias, imports Kibana dashboard │
+  ├───────────────────┼────────────────────────────────────────────────────────────────────────────────────┤
+  │ mbd-logstash      │ Reads logs/misbehaviors.log → transforms → indexes into ES                         │
+  └───────────────────┴────────────────────────────────────────────────────────────────────────────────────┘
+
+  Logstash starts only after mbd-setup completes successfully.
+
+  ---
+  Step 2 — Wait for ingestion to finish
+
+  # Watch Logstash until it goes quiet (no more "indexed" messages)
+  docker-compose logs -f logstash
+
+  # Check the record count directly in ES
+  curl http://localhost:9200/mbd-misbehaviors/_count
+
+  ---
+  Step 3 — Open Kibana
+
+  http://localhost:5601
+
+  Two data views are available:
+
+  ┌───────────────────┬──────────────────────────────────────────────┐
+  │     Data view     │                    Shows                     │
+  ├───────────────────┼──────────────────────────────────────────────┤
+  │ mbd-misbehaviors* │ All Level-1 records (full dataset)           │
+  ├───────────────────┼──────────────────────────────────────────────┤
+  │ mbd-display       │ Level-2 filtered view (default for analysts) │
+  └───────────────────┴──────────────────────────────────────────────┘
+
+  ---
+  Step 4 — Add interactive Controls to the dashboard (optional)
+
+  python manage_display_filter.py --setup-kibana
+
+  This adds the 10 range-slider controls (Speed km/h, Acceleration g, Jump m, …) to the existing dashboard so thresholds can
+   be adjusted live in the browser.
+
+  ---
+  Step 5 — Tune Level-2 thresholds (as needed)
+
+  # 1. Edit the thresholds
+  nano thresholds.json          # adjust gte/lte values
+
+  # 2. Push the new filter (no re-ingestion needed)
+  python manage_display_filter.py
+
+  # 3. Inspect the live filter
+  python manage_display_filter.py --show
+
+  ---
+  Step 6 — CLI report (optional)
+
+  python report.py
+
+  Queries ES directly and prints a summary (total count, breakdown by type, top vehicles, top RSUs).
+
+  ---
+  Tear-down / restart
+
+  docker-compose down          # stop containers (data persists in volumes)
+  docker-compose down -v       # stop AND delete ES data (clean slate)
+
+✻ Brewed for 49s
+
+● The setup container already ran (and completed) before these files were added — since it has restart: "no" it won't re-run
+   automatically. You need to apply the two missing steps manually from your terminal:
+
+  1. Create the ES alias:
+  curl -s -X POST "http://localhost:9200/_aliases"   -H "Content-Type: application/json"   --data-binary @elk/elasticsearch/display-alias.json
+
+  2. Import the Kibana data view:
+  curl -s -X POST "http://localhost:5601/api/saved_objects/_import?overwrite=true"   -H "kbn-xsrf: true"   -F "file=@elk/kibana/display-filter.ndjson"
+
+  After that, refresh Kibana → Stack Management → Data Views and you should see mbd-display listed alongside
+  mbd-misbehaviors*.

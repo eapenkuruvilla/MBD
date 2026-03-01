@@ -40,11 +40,13 @@ DECEL_NO_BRAKES_THRESHOLD:  3.00 m/s²  — magnitude of deceleration required
 
 from typing import Optional
 
-ACCEL_UNIT_MS2 = 0.01       # m/s² per LSB
-ACCEL_UNAVAILABLE = 2001
+from .utils import ACCEL_UNAVAILABLE, ACCEL_UNIT_MS2, G_MS2
 
-ACCEL_BRAKING_THRESHOLD   =  1.0 * 9.80665  # m/s²  — positive accel while brakes on
-DECEL_NO_BRAKES_THRESHOLD =  2.0 * 9.80665    # m/s²  — magnitude, decel without brakes
+ACCEL_BRAKING_THRESHOLD_G   = 1.0  # g  — positive accel while brakes on
+DECEL_NO_BRAKES_THRESHOLD_G = 1.0  # g  — magnitude, decel without brakes
+
+ACCEL_BRAKING_THRESHOLD_MS2   = ACCEL_BRAKING_THRESHOLD_G * G_MS2  # m/s²  — positive accel while brakes on
+DECEL_NO_BRAKES_THRESHOLD_MS2 = DECEL_NO_BRAKES_THRESHOLD_G * G_MS2    # m/s²  — magnitude, decel without brakes
 
 
 def _parse_accel(raw) -> Optional[float]:
@@ -88,20 +90,22 @@ def check(bsm: dict) -> Optional[dict]:
         return None
 
     # Case 1 — brakes applied but vehicle is accelerating
-    if any_braking and accel_ms2 > ACCEL_BRAKING_THRESHOLD:
+    if any_braking and accel_ms2 > ACCEL_BRAKING_THRESHOLD_MS2:
         return {
             "misbehavior":  "brakes_on_no_decel",
             "accel_ms2":    round(accel_ms2, 4),
-            "threshold_ms2": ACCEL_BRAKING_THRESHOLD,
+            "accel_g":      round(accel_ms2 / G_MS2, 4),
+            "threshold_ms2": ACCEL_BRAKING_THRESHOLD_MS2,
             "wheel_brakes": core["brakes"]["wheelBrakes"],
         }
 
     # Case 2 — heavy deceleration with no wheel brakes active
-    if not any_braking and accel_ms2 < -DECEL_NO_BRAKES_THRESHOLD:
+    if not any_braking and accel_ms2 < -DECEL_NO_BRAKES_THRESHOLD_MS2:
         return {
             "misbehavior":  "decel_no_brakes",
             "accel_ms2":    round(accel_ms2, 4),
-            "threshold_ms2": -DECEL_NO_BRAKES_THRESHOLD,
+            "accel_g":      round(accel_ms2 / G_MS2, 4),
+            "threshold_ms2": -DECEL_NO_BRAKES_THRESHOLD_MS2,
             "wheel_brakes": core["brakes"]["wheelBrakes"],
         }
 

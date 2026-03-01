@@ -10,10 +10,9 @@ BSM speed field (coreData.speed) is encoded per SAE J2735:
 
 from typing import Optional
 
-SPEED_UNIT_MS = 0.02          # m/s per LSB
-MS_TO_KMH = 3.6
-SPEED_UNAVAILABLE = 8191
-THRESHOLD_KMH = 500.0
+from .utils import MS_TO_KMH, SPEED_UNAVAILABLE, SPEED_UNIT_MS
+
+THRESHOLD_KMH = 200.0
 THRESHOLD_RAW = THRESHOLD_KMH / (SPEED_UNIT_MS * MS_TO_KMH)  # ~1666.67
 
 

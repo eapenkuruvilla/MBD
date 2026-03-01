@@ -18,31 +18,18 @@ MAX_GAP_SECONDS      : 60  — gaps longer than this are skipped (vehicle may
 """
 
 import math
-from datetime import datetime
 from typing import Optional
 
-HEADING_UNIT        = 0.0125  # degrees per LSB (SAE J2735)
-HEADING_UNAVAILABLE = 28800   # sentinel — "not available"
+from .utils import (
+    _haversine_m, _angular_diff, _parse_time, BaseDetector,
+    LAT_SCALE, LON_SCALE, SPEED_UNIT_MS, MS_TO_KMH,
+    HEADING_UNIT, HEADING_UNAVAILABLE,
+)
 
-LAT_SCALE     = 1e-7
-LON_SCALE     = 1e-7
-SPEED_UNIT_MS = 0.02          # m/s per LSB
-MS_TO_KMH     = 3.6
-
-MAX_HEADING_DIFF_DEG = 90.0   # degrees
-MIN_SPEED_KMH        = 200.0   # km/h
-MIN_DISTANCE_M       = 50.0    # metres
-MAX_GAP_SECONDS      = 1.0   # seconds
-
-
-def _haversine_m(lat1, lon1, lat2, lon2):
-    R = 6_371_000
-    phi1, phi2 = math.radians(lat1), math.radians(lat2)
-    dphi = math.radians(lat2 - lat1)
-    dlam = math.radians(lon2 - lon1)
-    a = (math.sin(dphi / 2) ** 2
-         + math.cos(phi1) * math.cos(phi2) * math.sin(dlam / 2) ** 2)
-    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+MAX_HEADING_DIFF_DEG = 20.0   # degrees
+MIN_SPEED_KMH        = 10.0   # km/h , about 1.0 g
+MIN_DISTANCE_M       = 5.0    # metres
+MAX_GAP_SECONDS      = 0.15   # seconds
 
 
 def _bearing_deg(lat1, lon1, lat2, lon2) -> float:
@@ -55,38 +42,12 @@ def _bearing_deg(lat1, lon1, lat2, lon2) -> float:
     return (math.degrees(math.atan2(x, y)) + 360) % 360
 
 
-def _angular_diff(a: float, b: float) -> float:
-    """Smallest unsigned difference between two compass headings (0–180°)."""
-    diff = abs(a - b) % 360
-    return diff if diff <= 180 else 360 - diff
-
-
-def _parse_time(ts: str) -> Optional[datetime]:
-    if not ts:
-        return None
-    clean = ts.split("[")[0].strip()
-    for fmt in (
-        "%Y-%m-%d %H:%M:%S.%f",
-        "%Y-%m-%d %H:%M:%S",
-        "%Y-%m-%dT%H:%M:%S.%f",
-        "%Y-%m-%dT%H:%M:%S",
-    ):
-        try:
-            return datetime.strptime(clean, fmt)
-        except ValueError:
-            pass
-    try:
-        return datetime.fromisoformat(clean.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-
-
-class HeadingInconsistencyDetector:
+class HeadingInconsistencyDetector(BaseDetector):
     """Stateful detector — tracks last position per vehicle to derive bearing."""
 
     def __init__(self):
         # vehicle_id -> (lat, lon, datetime)
-        self._last: dict = {}
+        super().__init__()
 
     def check(self, bsm: dict) -> Optional[dict]:
         meta = bsm.get("metadata", {})

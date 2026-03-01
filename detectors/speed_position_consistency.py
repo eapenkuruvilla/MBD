@@ -20,58 +20,25 @@ MIN_DISTANCE_M     :  1.0  — minimum displacement to produce a meaningful
                              implied-speed estimate
 """
 
-import math
-from datetime import datetime
 from typing import Optional
 
-LAT_SCALE        = 1e-7
-LON_SCALE        = 1e-7
-SPEED_UNIT_MS    = 0.02      # m/s per LSB
-SPEED_UNAVAIL    = 8191
-MS_TO_KMH        = 3.6
+from .utils import (
+    _haversine_m, _parse_time, BaseDetector,
+    LAT_SCALE, LON_SCALE, SPEED_UNIT_MS, SPEED_UNAVAILABLE, MS_TO_KMH,
+)
 
-MAX_SPEED_DIFF_KMH = 200.0
-MIN_SPEED_KMH      =  200.0
-MAX_GAP_SECONDS    =  1.0
-MIN_DISTANCE_M     =  500.0
-
-
-def _haversine_m(lat1, lon1, lat2, lon2) -> float:
-    R = 6_371_000
-    phi1, phi2 = math.radians(lat1), math.radians(lat2)
-    dphi = math.radians(lat2 - lat1)
-    dlam = math.radians(lon2 - lon1)
-    a = (math.sin(dphi / 2) ** 2
-         + math.cos(phi1) * math.cos(phi2) * math.sin(dlam / 2) ** 2)
-    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+MAX_SPEED_DIFF_KMH = 500.0
+MIN_SPEED_KMH      =  10.0
+MAX_GAP_SECONDS    =  0.15
+MIN_DISTANCE_M     =  10.0
 
 
-def _parse_time(ts: str) -> Optional[datetime]:
-    if not ts:
-        return None
-    clean = ts.split("[")[0].strip()
-    for fmt in (
-        "%Y-%m-%d %H:%M:%S.%f",
-        "%Y-%m-%d %H:%M:%S",
-        "%Y-%m-%dT%H:%M:%S.%f",
-        "%Y-%m-%dT%H:%M:%S",
-    ):
-        try:
-            return datetime.strptime(clean, fmt)
-        except ValueError:
-            pass
-    try:
-        return datetime.fromisoformat(clean.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-
-
-class SpeedPositionConsistencyDetector:
+class SpeedPositionConsistencyDetector(BaseDetector):
     """Stateful detector — tracks last known position/time per vehicle."""
 
     def __init__(self):
         # vehicle_id -> (lat, lon, datetime, speed_ms)
-        self._last: dict = {}
+        super().__init__()
 
     def check(self, bsm: dict) -> Optional[dict]:
         meta = bsm.get("metadata", {})
@@ -93,7 +60,7 @@ class SpeedPositionConsistencyDetector:
         except (ValueError, TypeError):
             return None
 
-        if spd_raw == SPEED_UNAVAIL:
+        if spd_raw == SPEED_UNAVAILABLE:
             return None
 
         speed_ms  = spd_raw * SPEED_UNIT_MS

@@ -20,45 +20,25 @@ MIN_DELTA_SPEED_MS : 0.10  — require a meaningful speed change before flagging
                              filters noise when the vehicle is nearly constant-speed
 """
 
-from datetime import datetime
 from typing import Optional
 
-SPEED_UNIT_MS  = 0.02    # m/s per LSB
-SPEED_UNAVAIL  = 8191
-ACCEL_UNIT_MS2 = 0.01    # m/s² per LSB
-ACCEL_UNAVAIL  = 2001
+from .utils import (
+    _parse_time, BaseDetector,
+    SPEED_UNIT_MS, SPEED_UNAVAILABLE, ACCEL_UNIT_MS2, ACCEL_UNAVAILABLE, MS_TO_KMH,
+)
 
-MAX_DELTA_ERROR_MS = 50.0
-MAX_GAP_SECONDS    = 1.0
-MIN_DELTA_SPEED_MS = 200 * 1000 / 3600
-
-
-def _parse_time(ts: str) -> Optional[datetime]:
-    if not ts:
-        return None
-    clean = ts.split("[")[0].strip()
-    for fmt in (
-        "%Y-%m-%d %H:%M:%S.%f",
-        "%Y-%m-%d %H:%M:%S",
-        "%Y-%m-%dT%H:%M:%S.%f",
-        "%Y-%m-%dT%H:%M:%S",
-    ):
-        try:
-            return datetime.strptime(clean, fmt)
-        except ValueError:
-            pass
-    try:
-        return datetime.fromisoformat(clean.replace("Z", "+00:00"))
-    except ValueError:
-        return None
+MAX_DELTA_ERROR_MS = 5.0
+MAX_GAP_SECONDS    = 0.15
+MIN_DELTA_SPEED_KMH = 20.0
+MIN_DELTA_SPEED_MS = MIN_DELTA_SPEED_KMH / MS_TO_KMH
 
 
-class SpeedAccelConsistencyDetector:
+class SpeedAccelConsistencyDetector(BaseDetector):
     """Stateful detector — tracks last speed/accel/time per vehicle."""
 
     def __init__(self):
         # vehicle_id -> (speed_ms, accel_ms2, datetime)
-        self._last: dict = {}
+        super().__init__()
 
     def check(self, bsm: dict) -> Optional[dict]:
         meta = bsm.get("metadata", {})
@@ -78,7 +58,7 @@ class SpeedAccelConsistencyDetector:
         except (ValueError, TypeError):
             return None
 
-        if spd_raw == SPEED_UNAVAIL or acc_raw == ACCEL_UNAVAIL:
+        if spd_raw == SPEED_UNAVAILABLE or acc_raw == ACCEL_UNAVAILABLE:
             return None
 
         speed_ms  = spd_raw * SPEED_UNIT_MS
@@ -115,6 +95,7 @@ class SpeedAccelConsistencyDetector:
             "observed_delta_ms": round(observed_delta, 4),
             "expected_delta_ms": round(expected_delta, 4),
             "error_ms":          round(error_ms, 4),
+            "error_kmh":         round(error_ms * MS_TO_KMH, 2),
             "threshold_ms":      MAX_DELTA_ERROR_MS,
             "accel_ms2":         round(prev_accel_ms2, 4),
             "elapsed_s":         round(elapsed_s, 3),

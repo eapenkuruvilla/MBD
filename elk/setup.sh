@@ -1,6 +1,7 @@
 #!/bin/sh
-# Applies the ES index template and imports the Kibana dashboard.
-# Critical: both the index template and Kibana dashboard import must succeed.
+# Applies the ES index template, creates the display-filter alias, and
+# imports the Kibana dashboard.
+# Critical: index template and Kibana dashboard import must succeed.
 
 ES="http://elasticsearch:9200"
 KB="http://kibana:5601"
@@ -32,6 +33,23 @@ if [ "$code" != "200" ]; then
 fi
 echo "[setup] Index template applied."
 
+# ── Create Level-2 display-filter alias ──────────────────────────────────────
+# The alias  mbd-display  wraps mbd-misbehaviors* with the default L2 filter
+# defined in elk/elasticsearch/display-alias.json (generated from thresholds.json).
+# To change thresholds later: edit thresholds.json and run manage_display_filter.py.
+echo "[setup] Creating display-filter alias  mbd-display..."
+code=$(curl_json POST "$ES/_aliases" \
+  -H "Content-Type: application/json" \
+  --data-binary @/setup/display-alias.json)
+echo "[setup] Alias response (HTTP $code): $(cat /tmp/resp.txt)"
+
+if [ "$code" = "200" ]; then
+  echo "[setup] Alias 'mbd-display' created."
+else
+  echo "[setup] WARNING: alias creation returned HTTP $code — continuing anyway."
+  echo "[setup]   Run manually:  python manage_display_filter.py --es-url $ES"
+fi
+
 # ── Wait for Kibana saved objects service ────────────────────────────────────
 echo "[setup] Waiting for Kibana saved objects service..."
 until curl -s -o /dev/null -w "%{http_code}" \
@@ -41,6 +59,13 @@ until curl -s -o /dev/null -w "%{http_code}" \
   sleep 5
 done
 echo "[setup] Kibana is up."
+
+# ── Import display-filter data view (mbd-display) ────────────────────────────
+echo "[setup] Importing display-filter data view..."
+code=$(curl_json POST "$KB/api/saved_objects/_import?overwrite=true" \
+  -H "kbn-xsrf: true" \
+  -F file=@/setup/display-filter.ndjson)
+echo "[setup] Display-filter response (HTTP $code): $(cat /tmp/resp.txt)"
 
 # ── Import KPI Vega visualizations first (must exist before dashboard import) ─
 echo "[setup] Importing KPI Vega visualizations..."
@@ -65,4 +90,13 @@ else
   exit 1
 fi
 
+echo ""
 echo "[setup] Done — open http://localhost:5601"
+echo ""
+echo "[setup] Two data views are available in Kibana:"
+echo "[setup]   mbd-misbehaviors*  — all Level-1 records (raw dataset)"
+echo "[setup]   mbd-display        — Level-2 filtered view (default for analysts)"
+echo ""
+echo "[setup] To adjust Level-2 thresholds:"
+echo "[setup]   1. Edit  thresholds.json"
+echo "[setup]   2. Run   python manage_display_filter.py [--setup-kibana]"

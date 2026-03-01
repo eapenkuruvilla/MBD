@@ -62,6 +62,25 @@ PROGRESS_INTERVAL = 1.0
 # Width used to overwrite previous progress lines (avoids leftover characters).
 _PROGRESS_WIDTH = 110
 
+# Short labels for each misbehavior type shown on the live counts line.
+# Order here is the display order.
+_TYPE_ABBREV = {
+    "speed_exceeded":                    "spd",
+    "accel_exceeded":                    "acc",
+    "brakes_on_no_decel":                "brk+",
+    "decel_no_brakes":                   "brk-",
+    "position_jump":                     "pos",
+    "heading_inconsistency":             "hdg",
+    "speed_position_inconsistency":      "spc",
+    "speed_accel_inconsistency":         "sac",
+    "implausible_heading_change_rate":   "hcr",
+    "yaw_rate_inconsistency":            "yaw",
+}
+
+# Tracks how many lines the last _progress() call printed (0, 1, or 2).
+# Used to correctly overwrite the previous output with ANSI cursor-up.
+_progress_line_count = 0
+
 
 def _fmt_eta(seconds: float) -> str:
     """Format a duration in seconds as a compact human-readable string."""
@@ -75,9 +94,47 @@ def _fmt_eta(seconds: float) -> str:
     return f"{s}s"
 
 
-def _progress(msg: str) -> None:
-    """Overwrite the current terminal line with msg, padded to a fixed width."""
-    print(f"\r{msg:<{_PROGRESS_WIDTH}}", end="", flush=True)
+def _fmt_counts(counts: dict) -> str:
+    """Format per-type misbehavior counts as a compact inline string."""
+    parts = []
+    for mtype, abbrev in _TYPE_ABBREV.items():
+        cnt = counts.get(mtype, 0)
+        if cnt:
+            parts.append(f"{abbrev}:{cnt:,}")
+    # Any future detector type not yet in _TYPE_ABBREV
+    for mtype, cnt in counts.items():
+        if mtype not in _TYPE_ABBREV and cnt:
+            parts.append(f"{mtype[:5]}:{cnt:,}")
+    return "  ".join(parts)
+
+
+def _progress(msg: str, counts=None) -> None:
+    """
+    Overwrite the terminal progress display with msg (line 1) and, when
+    counts is non-empty, a per-type breakdown (line 2).
+
+    Uses ANSI cursor-up so that subsequent calls rewrite the same lines
+    without scrolling.
+    """
+    global _progress_line_count
+
+    line1 = f"{msg:<{_PROGRESS_WIDTH}}"
+    counts_str = _fmt_counts(counts) if counts else ""
+
+    if _progress_line_count == 2:
+        # Previous output was 2 lines; cursor is at end of line 2.
+        # Move up 1 row and go to column 0 to overwrite line 1.
+        print(f"\033[1A\r{line1}", end="", flush=False)
+    else:
+        print(f"\r{line1}", end="", flush=False)
+
+    if counts_str:
+        line2 = f"{counts_str:<{_PROGRESS_WIDTH}}"
+        print(f"\n\r{line2}", end="", flush=True)
+        _progress_line_count = 2
+    else:
+        sys.stdout.flush()
+        _progress_line_count = 1
 
 
 def _haversine_m(lat1, lon1, lat2, lon2):
@@ -185,7 +242,8 @@ def _process_lines(lines, log_f, cooldown: dict, counts: dict,
                 elapsed = now - t0
                 rate = total / elapsed if elapsed > 0 else 0
                 _progress(
-                    f"  Records: {total:>10,} | Flagged: {flagged:>7,} | {rate:>8,.0f} rec/s"
+                    f"  Records: {total:>10,} | Flagged: {flagged:>7,} | {rate:>8,.0f} rec/s",
+                    counts,
                 )
                 last_print = now
 
@@ -282,7 +340,8 @@ def process_input(bsm_path: Path, log_path: Path):
                             f" | Records: {total:>10,}"
                             f" | Flagged: {flagged:>7,}"
                             f" | {rate:>8,.0f} rec/s"
-                            f" | ETA: {eta}"
+                            f" | ETA: {eta}",
+                            counts,
                         )
                         last_print = now
                 print()  # move past the progress line
