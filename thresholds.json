@@ -25,48 +25,46 @@
   "level2": {
 
     "speed_exceeded": {
-      "speed_kmh": { "gte": 500 }
+      "speed_kmh": { "gte": 200 }
     },
 
     "accel_exceeded": {
-      "accel_g": { "gte": 4.0 }
+      "accel_g": { "gte": 2.0 }
     },
 
     "position_jump": {
-      "jump_m":            { "gte": 1000 },
-      "implied_speed_kmh": { "gte": 300  }
+      "jump_m":            { "gte": 800 },
+      "implied_speed_kmh": { "gte": 10  }
     },
 
     "heading_inconsistency": {
-      "heading_diff": { "gte": 120 },
-      "distance_m":   { "gte": 50  }
+      "heading_diff": { "gte": 179.99},
+      "distance_m":   { "gte": 5  }
     },
 
     "implausible_heading_change_rate": {
-      "heading_rate_deg_s": { "gte": 150 },
-      "distance_m":         { "gte": 50  }
+      "heading_rate_deg_s": { "gte": 50000 }
     },
 
     "speed_position_inconsistency": {
-      "diff_kmh":   { "gte": 300 },
-      "distance_m": { "gte": 500 }
+      "abs_diff_kmh": { "gte": 500 },
+      "distance_m":   { "gte": 10 }
     },
 
     "speed_accel_inconsistency": {
-      "error_kmh": { "gte": 250 }
+      "error_kmh": { "gte": 150 }
     },
 
     "yaw_rate_inconsistency": {
-      "yaw_diff_deg_s": { "gte": 150 },
-      "distance_m":     { "gte": 50  }
+      "yaw_diff_deg_s": { "gte": 50000 }
     },
 
     "brakes_on_no_decel": {
-      "accel_g": { "gte": 1.5 }
+      "accel_g": { "gte": 1.0 }
     },
 
     "decel_no_brakes": {
-      "accel_g": { "lte": -3.0 }
+      "accel_g": { "lte": -2.0 }
     }
 
   }

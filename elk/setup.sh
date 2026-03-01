@@ -90,12 +90,32 @@ else
   exit 1
 fi
 
+# ── Import filtered dashboard (fatal) ────────────────────────────────────────
+echo "[setup] Importing filtered Kibana dashboard..."
+code=$(curl_json POST "$KB/api/saved_objects/_import?overwrite=true" \
+  -H "kbn-xsrf: true" \
+  -F file=@/setup/display-dashboard.ndjson)
+echo "[setup] Import response (HTTP $code): $(cat /tmp/resp.txt)"
+
+if [ "$code" = "200" ]; then
+  echo "[setup] Filtered dashboard imported."
+else
+  echo "[setup] ERROR: filtered dashboard import returned HTTP $code — aborting."
+  echo "[setup] Import manually: Kibana → Stack Management → Saved Objects → Import"
+  echo "[setup]   file: elk/kibana/display-dashboard.ndjson"
+  exit 1
+fi
+
 echo ""
 echo "[setup] Done — open http://localhost:5601"
 echo ""
 echo "[setup] Two data views are available in Kibana:"
 echo "[setup]   mbd-misbehaviors*  — all Level-1 records (raw dataset)"
 echo "[setup]   mbd-display        — Level-2 filtered view (default for analysts)"
+echo ""
+echo "[setup] Two dashboards are available in Kibana:"
+echo "[setup]   MBD Misbehavior Report          — all Level-1 records"
+echo "[setup]   MBD Misbehavior Report (Filtered) — Level-2 filtered view"
 echo ""
 echo "[setup] To adjust Level-2 thresholds:"
 echo "[setup]   1. Edit  thresholds.json"

@@ -2,7 +2,8 @@
 logs/misbehaviors.log → Logstash → Elasticsearch → report.py → Kibana dashboard
 # Regenerate the log
 python detector.py data/<bsm_file>
-python manage_display_filter.py
+# Ijest filtered data
+python manage_display_filter.py --es-url http://localhost:9200
 # Restart Logstash to re-index
 docker compose restart logstash
 # Re-import the updated dashboard
@@ -52,6 +53,9 @@ curl -s http://localhost:9200/mbd-misbehaviors-*/_count
 curl http://localhost:9200/_cat/indices?v
 # Then delete by exact name, e.g.:
 curl -X DELETE http://localhost:9200/mbd-misbehaviors-2026.02.27
+# Check what's actually in your data — query ES to see the distribution per type before deciding on thresholds:
+ curl -s "http://localhost:9200/mbd-misbehaviors*/_search" -H "Content-Type: application/json" -d '{"size":0,"aggs":{"by_type":{"terms":{"field":"misbehavior","size":20}}}}' | python3 -m json.tool
+ curl -s "http://localhost:9200/mbd-display/_search" -H "Content-Type: application/json" -d '{"size":0,"aggs":{"by_type":{"terms":{"field":"misbehavior","size":20}}}}' | python3 -m json.tool
 
 ##############  KIBANA  ##############
 # View dashboard
@@ -62,6 +66,7 @@ curl -s -X DELETE "http://localhost:5601/api/saved_objects/index-pattern/mbd-dat
 curl -s -X POST "http://localhost:5601/api/saved_objects/_import?overwrite=true"  -H "kbn-xsrf: true" -F file=@elk/kibana/dashboard.ndjson
 curl -s -X POST "http://localhost:5601/api/saved_objects/_import?overwrite=true" -H "kbn-xsrf: true" -F file=@elk/kibana/kpi-vega.ndjson | python3 -m json.tool
 curl -s -X POST "http://localhost:5601/api/saved_objects/_import?overwrite=true"  -H "kbn-xsrf: true"  -F file=@elk/kibana/dashboard.ndjson | python3 -m json.tool
+curl -s -o /dev/null -w "%{http_code}"   -X POST "http://localhost:5601/api/saved_objects/_import?overwrite=true"   -H "kbn-xsrf: true"  -F file=@elk/kibana/display-dashboard.ndjson
 
   accel_exceeded                      161, 2.0, 3.0
   brakes_on_no_decel                7,643, 1.0, 2.0

@@ -66,6 +66,7 @@ services:
       - ./elk/kibana/kpi-vega.ndjson:/setup/kpi-vega.ndjson:ro
       - ./elk/kibana/dashboard.ndjson:/setup/dashboard.ndjson:ro
       - ./elk/kibana/display-filter.ndjson:/setup/display-filter.ndjson:ro
+      - ./elk/kibana/display-dashboard.ndjson:/setup/display-dashboard.ndjson:ro
     entrypoint: ["sh", "-c", "apk add --no-cache curl && sh /setup/setup.sh"]
     depends_on:
       elasticsearch:
