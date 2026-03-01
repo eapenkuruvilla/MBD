@@ -29,10 +29,10 @@ LON_SCALE     = 1e-7
 SPEED_UNIT_MS = 0.02          # m/s per LSB
 MS_TO_KMH     = 3.6
 
-MAX_HEADING_DIFF_DEG = 25.0   # degrees
-MIN_SPEED_KMH        = 10.0   # km/h
-MIN_DISTANCE_M       = 5.0    # metres
-MAX_GAP_SECONDS      = 60.0   # seconds
+MAX_HEADING_DIFF_DEG = 90.0   # degrees
+MIN_SPEED_KMH        = 200.0   # km/h
+MIN_DISTANCE_M       = 50.0    # metres
+MAX_GAP_SECONDS      = 1.0   # seconds
 
 
 def _haversine_m(lat1, lon1, lat2, lon2):

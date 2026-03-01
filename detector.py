@@ -1,19 +1,27 @@
 """
 V2X BSM Misbehavior Detector
 
-Reads a NDJSON BSM data file, runs all registered detectors, and writes
-a JSON-lines log file (one entry per misbehavior detected) suitable for
-ingestion by Logstash / ELK.
+Reads BSM data and runs all registered detectors, writing a JSON-lines log
+file suitable for ingestion by Logstash / ELK.
+
+Input can be:
+  - A plain NDJSON file
+  - A ZIP archive containing one or more NDJSON data files at any depth;
+    every non-directory entry in the archive is treated as a data file.
 
 Usage:
-    python detector.py <bsm_file> [--log <log_file>]
+    python detector.py <bsm_file_or_zip> [--log <log_file>]
 """
 
 import argparse
 import hashlib
+import io
 import json
 import math
 import sys
+import time
+import zipfile
+from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -49,6 +57,28 @@ LON_SCALE = 1e-7
 COOLDOWN_METERS = 50.0
 COOLDOWN_SECONDS = 30.0
 
+# Progress line update interval (seconds).
+PROGRESS_INTERVAL = 1.0
+# Width used to overwrite previous progress lines (avoids leftover characters).
+_PROGRESS_WIDTH = 110
+
+
+def _fmt_eta(seconds: float) -> str:
+    """Format a duration in seconds as a compact human-readable string."""
+    seconds = int(seconds)
+    h, remainder = divmod(seconds, 3600)
+    m, s = divmod(remainder, 60)
+    if h:
+        return f"{h}h {m:02d}m"
+    if m:
+        return f"{m}m {s:02d}s"
+    return f"{s}s"
+
+
+def _progress(msg: str) -> None:
+    """Overwrite the current terminal line with msg, padded to a fixed width."""
+    print(f"\r{msg:<{_PROGRESS_WIDTH}}", end="", flush=True)
+
 
 def _haversine_m(lat1, lon1, lat2, lon2):
     R = 6_371_000
@@ -69,7 +99,6 @@ def _parse_bsm_time(ts: str):
     """
     if not ts:
         return None
-    # Strip trailing timezone label like " [ET]", " [UTC]", etc.
     clean = ts.split("[")[0].strip()
     for fmt in (
         "%Y-%m-%d %H:%M:%S.%f",
@@ -81,12 +110,10 @@ def _parse_bsm_time(ts: str):
             return datetime.strptime(clean, fmt)
         except ValueError:
             pass
-    # ISO 8601 with explicit offset
     try:
         return datetime.fromisoformat(clean.replace("Z", "+00:00"))
     except ValueError:
         pass
-    # Epoch milliseconds
     try:
         return datetime.fromtimestamp(int(ts) / 1000, tz=timezone.utc)
     except (ValueError, OSError):
@@ -95,7 +122,10 @@ def _parse_bsm_time(ts: str):
 
 def parse_args():
     parser = argparse.ArgumentParser(description="V2X BSM Misbehavior Detector")
-    parser.add_argument("bsm_file", help="Path to NDJSON BSM data file")
+    parser.add_argument(
+        "bsm_file",
+        help="Path to a NDJSON BSM data file or a ZIP archive of BSM data files",
+    )
     parser.add_argument(
         "--log",
         default="logs/misbehaviors.log",
@@ -123,66 +153,161 @@ def extract_context(bsm: dict) -> dict:
     }
 
 
-def process_file(bsm_path: Path, log_path: Path):
+def _process_lines(lines, log_f, cooldown: dict, counts: dict,
+                   report_progress: bool = False):
+    """
+    Core processing loop.  Runs all detectors over an iterable of raw text
+    lines, writes flagged events to log_f, and updates the shared cooldown
+    and counts dicts in place.
+
+    When report_progress is True, a \r progress line is printed at most once
+    per PROGRESS_INTERVAL seconds (used for plain-file mode).
+
+    Returns (total_records, flagged, suppressed) for this batch of lines.
+    """
+    total = 0
+    flagged = 0
+    suppressed = 0
+    t0 = time.monotonic()
+    last_print = t0
+
+    for line_num, line in enumerate(lines, start=1):
+        if isinstance(line, bytes):
+            line = line.decode("utf-8", errors="replace")
+        line = line.strip()
+        if not line:
+            continue
+        total += 1
+
+        if report_progress:
+            now = time.monotonic()
+            if now - last_print >= PROGRESS_INTERVAL:
+                elapsed = now - t0
+                rate = total / elapsed if elapsed > 0 else 0
+                _progress(
+                    f"  Records: {total:>10,} | Flagged: {flagged:>7,} | {rate:>8,.0f} rec/s"
+                )
+                last_print = now
+
+        try:
+            bsm = json.loads(line)
+        except json.JSONDecodeError as exc:
+            print(f"[WARN] line {line_num}: JSON parse error – {exc}", file=sys.stderr)
+            continue
+
+        context = extract_context(bsm)
+
+        for detector in DETECTORS:
+            result = detector.check(bsm)
+            if result is None:
+                continue
+
+            key = (context["vehicle_id"], result["misbehavior"])
+            lat, lon = context.get("lat"), context.get("lon")
+            bsm_time = _parse_bsm_time(context.get("record_generated_at", ""))
+            prev = cooldown.get(key)
+
+            if prev is not None and lat is not None and lon is not None:
+                prev_lat, prev_lon, prev_time = prev
+                close_space = _haversine_m(lat, lon, prev_lat, prev_lon) <= COOLDOWN_METERS
+                if bsm_time is not None and prev_time is not None:
+                    close_time = (
+                        abs((bsm_time - prev_time).total_seconds()) <= COOLDOWN_SECONDS
+                    )
+                else:
+                    close_time = False
+                if close_space and close_time:
+                    suppressed += 1
+                    continue
+
+            cooldown[key] = (lat, lon, bsm_time)
+
+            event_id = hashlib.sha1(
+                f"{context['vehicle_id']}|{context['record_generated_at']}|{result['misbehavior']}".encode()
+            ).hexdigest()[:16]
+            log_entry = {
+                "detected_at": datetime.now(timezone.utc).isoformat(),
+                "event_id": event_id,
+                **context,
+                **result,
+            }
+            log_f.write(json.dumps(log_entry) + "\n")
+            flagged += 1
+            counts[result["misbehavior"]] += 1
+
+    return total, flagged, suppressed
+
+
+def process_input(bsm_path: Path, log_path: Path):
+    """
+    Process a plain NDJSON file or a ZIP archive.  Returns
+    (total_records, total_flagged, total_suppressed, counts_by_type).
+    """
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
     total = 0
     flagged = 0
     suppressed = 0
-    # cooldown[(vehicle_id, misbehavior_type)] = (lat, lon, bsm_datetime)
+    counts = defaultdict(int)
     cooldown = {}
 
-    with bsm_path.open() as bsm_f, log_path.open("w") as log_f:
-        for line_num, line in enumerate(bsm_f, start=1):
-            line = line.strip()
-            if not line:
-                continue
-            total += 1
+    with log_path.open("w") as log_f:
+        if zipfile.is_zipfile(bsm_path):
+            with zipfile.ZipFile(bsm_path) as zf:
+                data_entries = [e for e in zf.infolist() if not e.filename.endswith("/")]
+                n = len(data_entries)
+                print(f"  ZIP contains {n:,} data file(s)")
+                t0 = time.monotonic()
+                last_print = t0
+                for i, entry in enumerate(data_entries, start=1):
+                    with zf.open(entry) as raw_f:
+                        lines = io.TextIOWrapper(raw_f, encoding="utf-8", errors="replace")
+                        t, fl, sup = _process_lines(lines, log_f, cooldown, counts)
+                    total += t
+                    flagged += fl
+                    suppressed += sup
 
-            try:
-                bsm = json.loads(line)
-            except json.JSONDecodeError as exc:
-                print(f"[WARN] line {line_num}: JSON parse error – {exc}", file=sys.stderr)
-                continue
+                    now = time.monotonic()
+                    if now - last_print >= PROGRESS_INTERVAL or i == n:
+                        elapsed = now - t0
+                        rate = total / elapsed if elapsed > 0 else 0
+                        pct = 100.0 * i / n
+                        eta = (
+                            _fmt_eta(elapsed / i * (n - i))
+                            if i < n and elapsed > 0
+                            else "done"
+                        )
+                        _progress(
+                            f"  Files: {i:>{len(str(n))},}/{n:,} ({pct:5.1f}%)"
+                            f" | Records: {total:>10,}"
+                            f" | Flagged: {flagged:>7,}"
+                            f" | {rate:>8,.0f} rec/s"
+                            f" | ETA: {eta}"
+                        )
+                        last_print = now
+                print()  # move past the progress line
+        else:
+            with bsm_path.open() as f:
+                t, fl, sup = _process_lines(f, log_f, cooldown, counts,
+                                            report_progress=True)
+            print()  # move past the progress line
+            total += t
+            flagged += fl
+            suppressed += sup
 
-            context = extract_context(bsm)
+    return total, flagged, suppressed, counts
 
-            for detector in DETECTORS:
-                result = detector.check(bsm)
-                if result is None:
-                    continue
 
-                key = (context["vehicle_id"], result["misbehavior"])
-                lat, lon = context.get("lat"), context.get("lon")
-                bsm_time = _parse_bsm_time(context.get("record_generated_at", ""))
-                prev = cooldown.get(key)
-
-                if prev is not None and lat is not None and lon is not None:
-                    prev_lat, prev_lon, prev_time = prev
-                    close_space = _haversine_m(lat, lon, prev_lat, prev_lon) <= COOLDOWN_METERS
-                    if bsm_time is not None and prev_time is not None:
-                        close_time = abs((bsm_time - prev_time).total_seconds()) <= COOLDOWN_SECONDS
-                    else:
-                        close_time = False
-                    if close_space and close_time:
-                        suppressed += 1
-                        continue
-
-                cooldown[key] = (lat, lon, bsm_time)
-
-                event_id = hashlib.sha1(
-                    f"{context['vehicle_id']}|{context['record_generated_at']}|{result['misbehavior']}".encode()
-                ).hexdigest()[:16]
-                log_entry = {
-                    "detected_at": datetime.now(timezone.utc).isoformat(),
-                    "event_id": event_id,
-                    **context,
-                    **result,
-                }
-                log_f.write(json.dumps(log_entry) + "\n")
-                flagged += 1
-
-    return total, flagged, suppressed
+def _print_summary(total, flagged, suppressed, counts):
+    print(f"\nProcessed : {total:,} records")
+    print(f"Flagged   : {flagged:,} misbehaviors ({suppressed:,} suppressed as nearby duplicates)")
+    if counts:
+        print("\nMisbehaviors by type:")
+        width = max(len(k) for k in counts)
+        for mtype, cnt in sorted(counts.items()):
+            print(f"  {mtype:<{width}}  {cnt:>6,}")
+    else:
+        print("\nNo misbehaviors detected.")
 
 
 def main():
@@ -191,15 +316,14 @@ def main():
     log_path = Path(args.log)
 
     if not bsm_path.exists():
-        print(f"Error: BSM file not found: {bsm_path}", file=sys.stderr)
+        print(f"Error: file not found: {bsm_path}", file=sys.stderr)
         sys.exit(1)
 
-    print(f"Processing: {bsm_path}")
-    print(f"Log output: {log_path}")
+    print(f"Input  : {bsm_path}")
+    print(f"Log    : {log_path}")
 
-    total, flagged, suppressed = process_file(bsm_path, log_path)
-
-    print(f"Done. Processed {total} records, flagged {flagged} misbehaviors ({suppressed} suppressed as nearby duplicates).")
+    total, flagged, suppressed, counts = process_input(bsm_path, log_path)
+    _print_summary(total, flagged, suppressed, counts)
 
 
 if __name__ == "__main__":

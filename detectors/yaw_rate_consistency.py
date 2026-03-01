@@ -39,10 +39,10 @@ YAW_UNIT        = 0.01      # degrees/s per LSB
 YAW_UNAVAIL     = 32767
 MS_TO_KMH       = 3.6
 
-MAX_YAW_DIFF_DEG_S = 25.0
-MIN_SPEED_KMH      = 10.0
-MAX_GAP_SECONDS    =  2.0
-MIN_DISTANCE_M     =  1.0
+MAX_YAW_DIFF_DEG_S = 90.0
+MIN_SPEED_KMH      = 200.0
+MAX_GAP_SECONDS    =  1.0
+MIN_DISTANCE_M     =  50.0
 
 
 def _haversine_m(lat1, lon1, lat2, lon2) -> float:

@@ -8,7 +8,6 @@ docker compose restart logstash
 curl -s -X POST "http://localhost:5601/api/saved_objects/_import?overwrite=true" -H "kbn-xsrf: true" -F file=@elk/kibana/kpi-vega.ndjson | python3 -m json.tool
 curl -s -X POST "http://localhost:5601/api/saved_objects/_import?overwrite=true" -H "kbn-xsrf: true" -F file=@elk/kibana/dashboard.ndjson | python3 -m json.tool
 
-
 ##############  ELK STACK  ##############
 docker compose down
 docker compose up -d
@@ -37,7 +36,6 @@ docker volume rm mbd_logstash_data
 docker compose run --rm logstash rm /usr/share/logstash/data/sincedb_misbehaviors
 docker exec mbd-logstash rm -f /usr/share/logstash/data/sincedb_misbehaviors
 
-
 ##############  ELASTIC SEARCH  ##############
 # 1. Delete the data
 curl -X DELETE http://localhost:9200/mbd-misbehaviors-2026.02.27
@@ -52,7 +50,6 @@ curl http://localhost:9200/_cat/indices?v
 # Then delete by exact name, e.g.:
 curl -X DELETE http://localhost:9200/mbd-misbehaviors-2026.02.27
 
-
 ##############  KIBANA  ##############
 # View dashboard
 http://localhost:5601 — open it, go to Dashboards, and select MBD Misbehavior Repor
@@ -63,106 +60,35 @@ curl -s -X POST "http://localhost:5601/api/saved_objects/_import?overwrite=true"
 curl -s -X POST "http://localhost:5601/api/saved_objects/_import?overwrite=true" -H "kbn-xsrf: true" -F file=@elk/kibana/kpi-vega.ndjson | python3 -m json.tool
 curl -s -X POST "http://localhost:5601/api/saved_objects/_import?overwrite=true"  -H "kbn-xsrf: true"  -F file=@elk/kibana/dashboard.ndjson | python3 -m json.tool
 
+  accel_exceeded                      161, 2.0, 3.0
+  brakes_on_no_decel                7,643, 1.0, 2.0
+  decel_no_brakes                  34,959, 1.0, 3.0
+  heading_inconsistency             9,299, 75, 90/ 10,20
+  implausible_heading_change_rate  22,854, 10, 30
+  position_jump                     8,284, 200, 300
+  speed_accel_inconsistency        55,877, 1,5
+  speed_exceeded                       88, 200,250
+  speed_position_inconsistency     56,753, 200,300/ 5,20
+  yaw_rate_inconsistency           30,612, 50,90/10,20
+
+  accel_exceeded                      161
+  brakes_on_no_decel                2,419
+  decel_no_brakes                   2,553
+  heading_inconsistency             6,946
+  implausible_heading_change_rate  15,345
+  position_jump                     8,042
+  speed_accel_inconsistency         5,314
+  speed_exceeded                       16
+  speed_position_inconsistency     50,656
+  yaw_rate_inconsistency           19,000
 
 
+  brakes_on_no_decel                23
+  decel_no_brakes                   41
+  heading_inconsistency              1
+  position_jump                    564
+  speed_accel_inconsistency          4
+  speed_position_inconsistency     564
 
 
-
-#####################################
-docker compose up -d
-docker compose up -d && docker compose logs -f setup
-pip install -r requirements.txt
-python report.py --days 7
-
-docker compose rm -sf filebeat && docker compose up -d filebeat
-  docker compose logs filebeat --tail=30     
-  docker compose logs logstash --tail=30        
-  sleep 5 && curl -s http://localhost:9200/mbd-misbehaviors-*/_count
-                                                                    
-  docker compose restart filebeat
-  sleep 10
-  curl -s http://localhost:9200/mbd-misbehaviors-*/_count
-
-
-
-
-  # Stop everything and restart (Filebeat container will be removed automatically)                                  
-  docker compose up -d
-  docker compose down
-
-  # Watch Logstash come up — takes ~60s                                                                          
-  docker compose logs -f logstash | grep -E "Pipeline|pipeline|misbehavior|error|Error"
-
-  # Watch Logstash come up — takes ~60s                                                                          
-  docker compose logs -f logstash | grep -E "Pipeline|pipeline|misbehavior|error|Error"
-
-  curl -s http://localhost:9600/ | python3 -m json.tool | grep status
-  curl -s http://localhost:9200/mbd-misbehaviors-*/_count
-
-
-
-
-  # wipes sincedb; name may be "mbd_logstash_data" or the dir prefix of your
-  project
-
-  # 3. Full restart
-  docker compose down && docker compose up -d
-
-  docker compose logs setup
-  docker exec mbd-logstash rm /usr/share/logstash/data/sincedb_misbehaviors
-  docker compose restart logstash
-  docker compose logs --tail=30 logstash 2>&1 | grep -E "WARN|ERROR|pipeline|event"
-  curl -s http://localhost:9200/mbd-misbehaviors-*/_count
-
-
-                                           
-                                                                        
-
-
-
-
-
-
-
-
-
-
-  # 1. Regenerate the log (now includes event_id)
-  python detector.py data/usdot-its-cvpilot-bsm-public-0-2020-05-06-07-00-00-0d434b66-b015-48f8-837e-3cee23013c19.json
-
-
-
-
-
-  curl http://localhost:9200/mbd-misbehaviors-*/_count
-
-
-
-    # Delete all stale dated indices
-  curl -X DELETE http://localhost:9200/mbd-misbehaviors-2026.02.27
-  curl -X DELETE http://localhost:9200/mbd-misbehaviors-2026.02.28
-
-
-
-  # Restart Logstash to pick up the new pipeline config
-  docker-compose restart logstash
-
-  To deploy, re-apply the template and restart everything:
-
-  curl -X PUT http://localhost:9200/_index_template/mbd-misbehaviors   -H "Content-Type: application/json" -d @elk/elasticsearch/index-template.json
-
-  curl -X DELETE http://localhost:9200/mbd-misbehaviors
-
-  curl -s -X POST "http://localhost:5601/api/saved_objects/_import?overwrite=true"   -H "kbn-xsrf: true" -F file=@elk/kibana/dashboard.ndjson
-
-  docker-compose restart logstash
-  Wait ~20 seconds for it to re-read the log, then verify:
-  curl http://localhost:9200/mbd-misbehaviors/_count
-
-  Also confirm Logstash has actually re-indexed the new data:
-  curl http://localhost:9200/mbd-misbehaviors/_count
-  curl http://localhost:9200/mbd-misbehaviors/_mapping | python3 -m json.tool | grep -E "speed|threshold"
-
-● Use the API to force a field list refresh — it's one curl command:
-  curl -X POST "http://localhost:5601/api/data_views/data_view/mbd-data-view/fields"   -H "kbn-xsrf: true"
 

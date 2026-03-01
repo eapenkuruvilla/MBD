@@ -43,8 +43,8 @@ from typing import Optional
 ACCEL_UNIT_MS2 = 0.01       # m/s² per LSB
 ACCEL_UNAVAILABLE = 2001
 
-ACCEL_BRAKING_THRESHOLD   =  0.40   # m/s²  — positive accel while brakes on
-DECEL_NO_BRAKES_THRESHOLD =  1.00   # m/s²  — magnitude, decel without brakes
+ACCEL_BRAKING_THRESHOLD   =  1.0 * 9.80665  # m/s²  — positive accel while brakes on
+DECEL_NO_BRAKES_THRESHOLD =  2.0 * 9.80665    # m/s²  — magnitude, decel without brakes
 
 
 def _parse_accel(raw) -> Optional[float]:

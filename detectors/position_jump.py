@@ -22,9 +22,9 @@ LAT_SCALE  = 1e-7
 LON_SCALE  = 1e-7
 MS_TO_KMH  = 3.6           # m/s → km/h
 
-MAX_JUMP_SPEED_KMH = 120.0  # km/h — implied speed must exceed this
-MIN_JUMP_METERS    = 50.0   # m    — filters out GPS noise on tiny Δt
-MAX_GAP_SECONDS    = 60.0   # s    — ignore gaps longer than this
+MAX_JUMP_SPEED_KMH = 200.0  # km/h — implied speed must exceed this
+MIN_JUMP_METERS    = 500.0   # m    — filters out GPS noise on tiny Δt
+MAX_GAP_SECONDS    = 1.0   # s    — ignore gaps longer than this
 
 
 def _haversine_m(lat1, lon1, lat2, lon2):

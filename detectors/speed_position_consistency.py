@@ -30,10 +30,10 @@ SPEED_UNIT_MS    = 0.02      # m/s per LSB
 SPEED_UNAVAIL    = 8191
 MS_TO_KMH        = 3.6
 
-MAX_SPEED_DIFF_KMH = 80.0
-MIN_SPEED_KMH      =  5.0
-MAX_GAP_SECONDS    =  2.0
-MIN_DISTANCE_M     =  1.0
+MAX_SPEED_DIFF_KMH = 200.0
+MIN_SPEED_KMH      =  200.0
+MAX_GAP_SECONDS    =  1.0
+MIN_DISTANCE_M     =  500.0
 
 
 def _haversine_m(lat1, lon1, lat2, lon2) -> float:

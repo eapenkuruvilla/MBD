@@ -16,7 +16,7 @@ from typing import Optional
 ACCEL_UNIT_MS2 = 0.01          # m/s² per LSB
 G_MS2 = 9.80665                # standard gravity
 ACCEL_UNAVAILABLE = 2001
-THRESHOLD_G = 0.20
+THRESHOLD_G = 3.0
 THRESHOLD_MS2 = THRESHOLD_G * G_MS2
 
 
