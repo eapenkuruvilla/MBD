@@ -480,6 +480,55 @@ vehicle_id : "0123456789abcdef"
 Click the **+** icon in the filter bar for a point-and-click field/value
 picker if you prefer not to type KQL.
 
+### Preserving dashboard changes
+
+Dashboard edits made in the Kibana UI are stored in Elasticsearch (the
+`.kibana_*` index), not on disk.  The NDJSON files in `elk/kibana/` are only
+read at `docker compose up` time.  If you wipe the ES volume
+(`docker compose down -v`) your changes are lost.
+
+To save your current Kibana state back to disk before a destructive operation:
+
+```bash
+curl -s "http://localhost:5601/api/saved_objects/_export" \
+  -H "kbn-xsrf: true" \
+  -H "Content-Type: application/json" \
+  -d '{"type":"dashboard","includeReferencesDeep":true}' \
+  > elk/kibana/dashboard.ndjson
+```
+
+This overwrites `elk/kibana/dashboard.ndjson` with your current dashboard
+state so it is reimported the next time the stack starts from scratch.
+
+### Discarding dashboard edits and reloading from disk
+
+To throw away all Kibana UI changes and restore the dashboards exactly as
+they are in `elk/kibana/`:
+
+```bash
+# Reimport all Kibana saved objects from the source files (overwrites live state)
+curl -X POST "http://localhost:5601/api/saved_objects/_import?overwrite=true" \
+  -H "kbn-xsrf: true" \
+  -F "file=@elk/kibana/dashboard.ndjson"
+
+curl -X POST "http://localhost:5601/api/saved_objects/_import?overwrite=true" \
+  -H "kbn-xsrf: true" \
+  -F "file=@elk/kibana/display-dashboard.ndjson"
+```
+
+Then hard-refresh Kibana (`Ctrl+Shift+R`).  No stack restart is needed.
+
+### Docker down vs. curl reimport
+
+| Command | ES data | Kibana saved objects | Reimports NDJSON? |
+|---|---|---|---|
+| `docker compose down` | kept | kept | No |
+| `docker compose down -v` | **wiped** | **wiped** | Yes, on next `up` |
+| curl reimport (above) | kept | overwritten | Immediately, no restart |
+
+Use `docker compose down -v` only as a last resort — it also wipes all
+misbehavior event indices, requiring a full `make fresh` to reingest data.
+
 ---
 
 ## Troubleshooting
