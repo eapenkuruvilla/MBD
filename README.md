@@ -17,9 +17,10 @@ anomalous behaviour, and visualises findings in Kibana.
 7. [Detectors](#detectors)
 8. [Threshold System (L1 / L2)](#threshold-system-l1--l2)
 9. [Kibana Dashboards](#kibana-dashboards)
-10. [Troubleshooting](#troubleshooting)
-11. [Development: Unit Tests](#development-unit-tests)
-12. [Project Structure](#project-structure)
+10. [Network Access & Security](#network-access--security)
+11. [Troubleshooting](#troubleshooting)
+12. [Development: Unit Tests](#development-unit-tests)
+13. [Project Structure](#project-structure)
 
 ---
 
@@ -564,6 +565,56 @@ Then hard-refresh Kibana (`Ctrl+Shift+R`).  No stack restart is needed.
 
 Use `docker compose down -v` only as a last resort — it also wipes all
 misbehavior event indices, requiring a full `make fresh` to reingest data.
+
+---
+
+## Network Access & Security
+
+### Default binding
+
+The `docker-compose.yml` publishes Kibana as `"5601:5601"`, which Docker
+binds to **all network interfaces** (`0.0.0.0`).  Kibana is therefore
+reachable from any host that can reach this machine on port 5601.  With the
+Basic license there is no login prompt, so anyone who can reach the port has
+full read/write access to the dashboards.
+
+### Restricting to localhost
+
+For a machine with a public IP, restrict the binding to loopback only:
+
+```yaml
+# docker-compose.yml
+ports:
+  - "127.0.0.1:5601:5601"
+```
+
+Then restart the stack:
+
+```bash
+docker compose down && docker compose up -d
+```
+
+### Secure remote access via SSH tunnel
+
+Keep the `127.0.0.1` binding and open a tunnel from your laptop:
+
+```bash
+ssh -L 5601:localhost:5601 user@your-host
+```
+
+Then browse to `http://localhost:5601` on your laptop.  The tunnel encrypts
+the traffic and no port needs to be opened in the firewall.
+
+### Verifying exposure
+
+To check whether Kibana is reachable from another machine:
+
+```bash
+curl -s http://<host-ip>:5601/api/status | head -c 100
+```
+
+A JSON response means Kibana is publicly accessible; a connection error means
+the firewall is blocking the port.
 
 ---
 
