@@ -1,4 +1,12 @@
 ##############  WORK FlOW  ##############
+ make run   [DATA=…]   # detect → append to log
+  make full  [DATA=…]   # run + restart Logstash + push alias
+  make fresh [DATA=…]   # delete today's ES index + run --clear + full
+  make filter           # push thresholds.json → mbd-display alias
+  make ingest           # restart Logstash only
+  make clear            # delete today's ES index
+  make test             # pytest tests/
+
 # 1. Regenerate the log with fixed detectors
 python detector.py <your_bsm_file> --log logs/misbehaviors.log
 # 2. Wipe the old index (and alias)

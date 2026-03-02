@@ -51,4 +51,4 @@ fresh: clear
 	python manage_display_filter.py --es-url $(ES)
 
 test:
-	pytest tests/ -v
+	python -m pytest tests/ -v
