@@ -173,14 +173,32 @@ This single command:
 
 ### Deleting all historical indices
 
-`make fresh` only deletes today's index.  To wipe all MBD indices across all
-dates, run:
+The easiest way to wipe all MBD data across all dates is to bring the stack
+down with the `-v` flag, which removes Docker volumes (Elasticsearch data and
+Kibana state), then restart:
+
+```bash
+docker compose down -v
+docker compose up -d
+
+# Wait for the stack to be healthy, then restore data
+make ingest    # re-ingest the detection log into Elasticsearch
+make filter    # re-create the mbd-display alias (filtered dashboard)
+```
+
+Dashboards and data views are re-imported automatically on the next `up`
+(see `setup.sh`), but Elasticsearch data and the display alias are not —
+`make ingest` and `make filter` are required to repopulate both dashboards.
+
+If you want to keep Kibana configuration (saved dashboards, customisations)
+and only remove Elasticsearch indices, delete them one by one — wildcards are
+blocked by the ES safety setting:
 
 ```bash
 # List all MBD indices
 curl http://localhost:9200/mbd-misbehaviors*?pretty
 
-# Delete them one by one (wildcards are blocked by ES safety setting)
+# Delete them one by one
 curl -X DELETE http://localhost:9200/mbd-misbehaviors-2024.06.01
 curl -X DELETE http://localhost:9200/mbd-misbehaviors-2024.06.02
 # ... repeat for each index shown above ...
