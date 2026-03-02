@@ -42,7 +42,7 @@ Elasticsearch          ← Index: mbd-misbehaviors-YYYY.MM.dd
        ├─ mbd-display alias  ← L2 filter from thresholds.json
        │                        (manage_display_filter.py)
        ▼
-   Kibana               ← Dashboards, KPI panels, interactive Controls sliders
+   Kibana               ← Dashboards and KPI panels
 ```
 
 **Key components:**
@@ -54,7 +54,7 @@ Elasticsearch          ← Index: mbd-misbehaviors-YYYY.MM.dd
 | `logs/misbehaviors.log` | JSON-lines event log consumed by Logstash |
 | Logstash | Ships log lines to Elasticsearch; creates date-stamped indices |
 | Elasticsearch | Stores events; hosts the `mbd-display` filtered alias |
-| Kibana | Dashboards and Controls sliders for interactive exploration |
+| Kibana | Dashboards and KPI panels for interactive exploration |
 | `manage_display_filter.py` | Pushes L2 filter from `thresholds.json` into ES as an alias |
 | `thresholds.json` | Editable per-type L2 display thresholds |
 | `Makefile` | Single entry point for all common operations |
@@ -126,7 +126,7 @@ make filter
 2. Each BSM is passed through all 9 detectors.  When a detector fires, a
    JSON event is written to `logs/misbehaviors.log`.
 3. A cooldown mechanism suppresses duplicate events for the same vehicle
-   and misbehavior type within 50 m / 30 s (prevents map dot spam).
+   and misbehavior type within 50 m / 30 s.
 4. Restarting Logstash (`make ingest`) causes Filebeat to re-read the log
    from the beginning and ship all lines to Elasticsearch.
 5. Logstash creates or appends to today's date-stamped index
@@ -457,33 +457,28 @@ Two dashboards are imported automatically on first `docker compose up`:
 | **MBD Misbehaviors** | `mbd-misbehaviors*` (all L1 events) | Maps, time series, breakdown tables |
 | **MBD Display** | `mbd-display` (L2 filtered) | Same layout, higher-confidence subset |
 
-### Interactive Controls sliders
+### Filtering within the dashboard
 
-Run once after the stack is up to add range-slider Controls to the MBD
-dashboard:
+Kibana's built-in **KQL bar** (top of every dashboard) supports ad-hoc
+filtering on any field without modifying the data or the L2 alias.
+Examples:
 
-```bash
-python manage_display_filter.py --setup-kibana
+```
+# Show only position jumps
+misbehavior : "position_jump"
+
+# Speed events above 250 km/h
+misbehavior : "speed_exceeded" and speed_kmh > 250
+
+# Large heading discrepancies
+heading_diff > 170
+
+# Specific vehicle
+vehicle_id : "0123456789abcdef"
 ```
 
-This adds 10 interactive controls at the top of the dashboard:
-
-| Control | Field | Type |
-|---|---|---|
-| Misbehavior Type | `misbehavior` | Dropdown |
-| Speed (km/h) | `speed_kmh` | Range slider |
-| Acceleration (g) | `accel_g` | Range slider |
-| Position Jump (m) | `jump_m` | Range slider |
-| Implied Speed (km/h) | `implied_speed_kmh` | Range slider |
-| Heading Diff (°) | `heading_diff` | Range slider |
-| Heading Rate (°/s) | `heading_rate_deg_s` | Range slider |
-| Speed Diff (km/h) | `diff_kmh` | Range slider |
-| Accel Error (km/h) | `error_kmh` | Range slider |
-| Yaw Diff (°/s) | `yaw_diff_deg_s` | Range slider |
-
-Dragging a slider instantly filters the dashboard panels without touching
-the underlying data.  The Controls layer is client-side and on top of
-whichever L1/L2 data view is selected.
+Click the **+** icon in the filter bar for a point-and-click field/value
+picker if you prefer not to type KQL.
 
 ---
 
@@ -576,7 +571,7 @@ curl http://localhost:5601/api/status | python3 -m json.tool | grep '"level"'
 docker compose up setup
 ```
 
-- Controls sliders missing: run `python manage_display_filter.py --setup-kibana`.
+- Unexpected "can't be loaded" errors on panels: reimport the dashboard from the source file — `curl -X POST "http://localhost:5601/api/saved_objects/_import?overwrite=true" -H "kbn-xsrf: true" -F "file=@elk/kibana/dashboard.ndjson"`
 
 ---
 
@@ -680,7 +675,7 @@ bsm = make_bsm(
 ```
 MBD/
 ├── detector.py                  Main entry point — reads BSMs, runs detectors
-├── manage_display_filter.py     Pushes L2 thresholds to ES; adds Kibana Controls
+├── manage_display_filter.py     Pushes L2 thresholds to ES; creates mbd-display data view
 ├── thresholds.json              L2 display thresholds (editable)
 ├── Makefile                     Single entry point for all common operations
 ├── requirements.txt             Python dependencies
