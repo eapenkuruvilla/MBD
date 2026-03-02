@@ -500,6 +500,24 @@ curl -s "http://localhost:5601/api/saved_objects/_export" \
 This overwrites `elk/kibana/dashboard.ndjson` with your current dashboard
 state so it is reimported the next time the stack starts from scratch.
 
+### Pushing edited NDJSON files to Kibana
+
+After editing the NDJSON files on disk (e.g., changing the default time range,
+adding a panel, or modifying a visualisation), push the changes to the live
+Kibana instance without restarting the stack:
+
+```bash
+curl -X POST "http://localhost:5601/api/saved_objects/_import?overwrite=true" \
+  -H "kbn-xsrf: true" \
+  -F "file=@elk/kibana/dashboard.ndjson"
+
+curl -X POST "http://localhost:5601/api/saved_objects/_import?overwrite=true" \
+  -H "kbn-xsrf: true" \
+  -F "file=@elk/kibana/display-dashboard.ndjson"
+```
+
+Then hard-refresh Kibana (`Ctrl+Shift+R`).
+
 ### Discarding dashboard edits and reloading from disk
 
 To throw away all Kibana UI changes and restore the dashboards exactly as
