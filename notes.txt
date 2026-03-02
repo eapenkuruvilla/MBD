@@ -222,3 +222,149 @@ Misbehaviors by type:
   speed_position_inconsistency      1,417
   yaw_rate_inconsistency              928
 
+  Single entry point — Makefile
+
+  make run   [DATA=…]   # detect → append to log
+  make full  [DATA=…]   # run + restart Logstash + push alias
+  make fresh [DATA=…]   # delete today's ES index + run --clear + full
+  make filter           # push thresholds.json → mbd-display alias
+  make ingest           # restart Logstash only
+  make clear            # delete today's ES index
+  make test             # pytest tests/
+
+  Index lifecycle
+
+  - Logstash: index is now mbd-misbehaviors-%{+YYYY.MM.dd} — each day's data is isolated; the existing mbd-misbehaviors-*
+  wildcard in manage_display_filter.py covers all of them automatically
+  - detector.py --clear: opens the log in truncate (w) mode instead of append (a); the default is now append so data from
+  multiple partial runs accumulates in the log but each fresh run starts clean
+  - manage_display_filter.py: placeholder index is now mbd-misbehaviors-YYYY.MM.dd (today's date) instead of the bare
+  mbd-misbehaviors
+
+  Detector unit tests — tests/
+
+  9 test files + conftest.py. The make_bsm() helper converts physical units (km/h, m/s², degrees) to J2735 raw integers so
+  tests are readable. In the process, found and fixed a stale docstring: MAX_HEADING_DIFF_DEG was documented as 20° but the
+  code value is 90°.
+
+  Run with: make test (or pytest tests/ -v directly).
+----------------------------
+❯ How to delete all the data and start fresh all over
+
+● Two options depending on how thorough you want to be:
+
+  ---
+  Option A — Data only (keep containers running)
+
+  Delete all MBD indices, clear the log, re-run:
+
+  # 1. Delete every mbd-misbehaviors-* index
+  curl -s "http://localhost:9200/_cat/indices?h=index&index=mbd-misbehaviors*" \
+    | xargs -r -I{} curl -s -o /dev/null -w "Deleted {}: %{http_code}\n" \
+        -X DELETE "http://localhost:9200/{}"
+
+  # 2. Run fresh (truncates log, restarts Logstash, rebuilds alias)
+  make fresh DATA=data/your-file.zip
+
+  ---
+  Option B — Full reset (wipe everything including Kibana/ES state)
+
+  # 1. Tear down containers and remove all Docker volumes
+  docker compose down -v
+
+  # 2. Bring everything back up
+  docker compose up -d
+
+  # 3. Wait ~30 s for ES + Kibana to be ready, then re-run setup
+  #    (re-imports dashboards, index template, alias)
+  bash elk/setup.sh
+
+  # 4. Detect and ingest fresh data
+  make fresh DATA=data/your-file.zip
+
+  ---
+  Use Option A if you just want clean data but keep Kibana dashboards intact. Use Option B if something is broken at the
+  infrastructure level and you want a completely clean slate.
+---------------------------
+ Would it be easy to add  sliderd to dynamically adjust the threshlds?
+
+● Searched for 1 pattern, read 1 file (ctrl+o to expand)
+
+● It's already there — --setup-kibana adds exactly that. But there's an important distinction between two kinds of threshold
+   control.
+
+  ---
+  What --setup-kibana already gives you
+
+  python manage_display_filter.py --es-url http://localhost:9200 \
+                                   --kibana-url http://localhost:5601 \
+                                   --setup-kibana
+
+  This patches the dashboard with a Kibana Controls panel containing range sliders for every numeric field —
+  heading_rate_deg_s, diff_kmh, yaw_diff_deg_s, etc. Moving a slider immediately narrows what the dashboard shows, no
+  restart required.
+
+  ---
+  The two-tier picture
+
+  Raw data (mbd-misbehaviors-*)
+         │
+         ▼
+    ES alias filter  ←── thresholds.json  ←── manage_display_filter.py
+    (mbd-display)         (static floor)        (run to change floor)
+         │
+         ▼
+    Kibana Controls sliders  ←── user drags in browser
+    (interactive, on top)         (instant, no restart)
+         │
+         ▼
+    Dashboard panels
+
+  - Alias filter = the permanent server-side floor. Records that don't meet it never reach Kibana at all. Changing it
+  requires editing thresholds.json and re-running the script.
+  - Controls sliders = an additional client-side filter on top of whatever the alias exposes. Instant, interactive,
+  per-session.
+
+  ---
+  Practical workflow
+
+  If you want to use sliders to discover good threshold values:
+
+  1. Temporarily lower (or remove) the L2 alias thresholds so all L1 data is visible in the mbd-display view
+  2. Use the sliders to explore the data and find where the clean/dirty boundary sits
+  3. Copy those values into thresholds.json and run manage_display_filter.py to make them permanent
+
+  If the sliders are just for ad-hoc exploration on top of the already-filtered set, run --setup-kibana once and they'll be
+  there.
+
+✻ Worked for 56s
+
+❯ Hpw to access "Kibana Controls sliders"
+
+● Read 1 file (ctrl+o to expand)
+
+● Step 1 — run setup (one time)
+
+  python manage_display_filter.py \
+    --es-url     http://localhost:9200 \
+    --kibana-url http://localhost:5601 \
+    --setup-kibana
+
+  You should see output like:
+  ✓ Controls panel added to dashboard 'MBD Misbehavior Report (…)'
+    10 sliders: Misbehavior Type, Speed (km/h), Acceleration (g), …
+
+  Step 2 — open the dashboard
+
+  http://localhost:5601 → Analytics → Dashboards → open the dashboard that was patched.
+
+  The Controls appear as a horizontal bar across the top of the dashboard, above all the panels — one dropdown for
+  Misbehavior Type and one range slider per numeric field. Drag the handles to narrow the data shown below in real time.
+
+  ---
+  One thing to be aware of: the function currently searches for the first dashboard with "MBD" in the title, so it patches
+  whichever one comes back first from Kibana's API — likely the raw MBD Misbehavior Report, not the filtered one. If you
+  want the sliders on both dashboards (or specifically the filtered one), run --setup-kibana a second time and check the
+  output to confirm which dashboard was patched. If the wrong one was updated, you can check by looking at which dashboard
+  now shows the control bar at the top after refreshing.
+

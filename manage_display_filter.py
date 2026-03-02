@@ -31,6 +31,7 @@ Usage
 import argparse
 import json
 import sys
+from datetime import date
 from pathlib import Path
 
 try:
@@ -175,9 +176,10 @@ def push_alias(es: Elasticsearch, filter_query: dict, dry_run: bool = False) -> 
     except Exception:
         hits = ""
     if not hits:
-        base_index = SOURCE_INDEX.rstrip("*").rstrip("-")
-        es.indices.create(index=base_index, ignore=400)
-        print(f"  Created placeholder index '{base_index}'.")
+        today = date.today().strftime("%Y.%m.%d")
+        placeholder = f"mbd-misbehaviors-{today}"
+        es.indices.create(index=placeholder, ignore=400)
+        print(f"  Created placeholder index '{placeholder}'.")
 
     es.indices.update_aliases(body={"actions": actions})
     print(f"✓ Alias '{ALIAS_NAME}' → '{SOURCE_INDEX}' created/updated.")

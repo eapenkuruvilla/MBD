@@ -7,7 +7,7 @@ discrepancy suggests the heading field has been spoofed or corrupted.
 
 Thresholds
 ----------
-MAX_HEADING_DIFF_DEG : 20  — allowed angular difference between reported
+MAX_HEADING_DIFF_DEG : 90  — allowed angular difference between reported
                              heading and GPS-derived bearing
 MIN_SPEED_KMH        : 10  — only check when the vehicle is actually moving;
                              heading noise dominates at near-zero speed

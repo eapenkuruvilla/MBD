@@ -188,6 +188,11 @@ def parse_args():
         default="logs/misbehaviors.log",
         help="Output log file path (default: logs/misbehaviors.log)",
     )
+    parser.add_argument(
+        "--clear",
+        action="store_true",
+        help="Truncate the log file before writing (removes entries from previous runs)",
+    )
     return parser.parse_args()
 
 
@@ -296,10 +301,11 @@ def _process_lines(lines, log_f, cooldown: dict, counts: dict,
     return total, flagged, suppressed
 
 
-def process_input(bsm_path: Path, log_path: Path):
+def process_input(bsm_path: Path, log_path: Path, clear: bool = False):
     """
     Process a plain NDJSON file or a ZIP archive.  Returns
     (total_records, total_flagged, total_suppressed, counts_by_type).
+    When clear=True the log is truncated; otherwise new entries are appended.
     """
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -309,7 +315,8 @@ def process_input(bsm_path: Path, log_path: Path):
     counts = defaultdict(int)
     cooldown = {}
 
-    with log_path.open("w") as log_f:
+    mode = "w" if clear else "a"
+    with log_path.open(mode) as log_f:
         if zipfile.is_zipfile(bsm_path):
             with zipfile.ZipFile(bsm_path) as zf:
                 data_entries = [e for e in zf.infolist() if not e.filename.endswith("/")]
@@ -379,9 +386,9 @@ def main():
         sys.exit(1)
 
     print(f"Input  : {bsm_path}")
-    print(f"Log    : {log_path}")
+    print(f"Log    : {log_path}{'  (clearing)' if args.clear else ''}")
 
-    total, flagged, suppressed, counts = process_input(bsm_path, log_path)
+    total, flagged, suppressed, counts = process_input(bsm_path, log_path, clear=args.clear)
     _print_summary(total, flagged, suppressed, counts)
 
 
