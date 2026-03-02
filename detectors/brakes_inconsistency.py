@@ -30,12 +30,12 @@ accelSet.long : integer, unit 0.01 m/s² per LSB, range -2000 to 2000
 
 Thresholds
 ----------
-ACCEL_BRAKING_THRESHOLD  :  0.50 m/s²  — positive accel above this while
-                             braking is flagged (empirical ceiling from clean
-                             data: +0.45 m/s²)
-DECEL_NO_BRAKES_THRESHOLD:  3.00 m/s²  — magnitude of deceleration required
-                             to flag the no-brakes case (well above the
-                             ~1.5 m/s² engine-braking ceiling)
+ACCEL_BRAKING_THRESHOLD  :  1.0 g (9.81 m/s²)  — positive accel above this
+                             while braking is flagged (empirical ceiling from
+                             clean data: +0.45 m/s²)
+DECEL_NO_BRAKES_THRESHOLD:  1.0 g (9.81 m/s²)  — magnitude of deceleration
+                             required to flag the no-brakes case (well above
+                             the ~1.5 m/s² engine-braking ceiling)
 """
 
 from typing import Optional

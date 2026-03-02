@@ -17,24 +17,26 @@ and direction errors.
 
 Thresholds
 ----------
-MAX_YAW_DIFF_DEG_S : 25.0  — |reported_yaw − gps_heading_rate| above this is
+MAX_YAW_DIFF_DEG_S : 90.0  — |reported_yaw − gps_heading_rate| above this is
                              flagged; set above the p99 (19.0 °/s) of clean pairs
 MIN_SPEED_KMH      : 10.0  — only check when actually moving; yaw is noisy
                              at near-zero speed
-MAX_GAP_SECONDS    :  2.0  — gaps longer than this are skipped
-MIN_DISTANCE_M     :  1.0  — minimum displacement for a reliable heading rate
+MIN_GAP_SECONDS    : 0.05  — pairs closer than this are timing artifacts
+MAX_GAP_SECONDS    : 0.15  — gaps longer than this are skipped
+MIN_DISTANCE_M     :  5.0  — minimum displacement for a reliable heading rate
 """
 
 from typing import Optional
 
 from .utils import (
-    _haversine_m, _parse_time, BaseDetector,
+    _haversine_m, _parse_secmark, _secmark_elapsed_s, BaseDetector,
     LAT_SCALE, LON_SCALE, HEADING_UNIT, HEADING_UNAVAILABLE,
     SPEED_UNIT_MS, SPEED_UNAVAILABLE, YAW_UNIT, YAW_UNAVAILABLE, MS_TO_KMH,
 )
 
 MAX_YAW_DIFF_DEG_S = 90.0
 MIN_SPEED_KMH      = 10.0
+MIN_GAP_SECONDS    =  0.05
 MAX_GAP_SECONDS    =  0.15
 MIN_DISTANCE_M     =  5.0
 
@@ -54,11 +56,10 @@ class YawRateConsistencyDetector(BaseDetector):
     """Stateful detector — tracks last heading/position/time per vehicle."""
 
     def __init__(self):
-        # vehicle_id -> (heading_deg, lat, lon, datetime)
+        # vehicle_id -> (heading_deg, lat, lon, secmark)
         super().__init__()
 
     def check(self, bsm: dict) -> Optional[dict]:
-        meta = bsm.get("metadata", {})
         core = bsm.get("payload", {}).get("data", {}).get("coreData", {})
 
         vehicle_id = core.get("id")
@@ -67,7 +68,6 @@ class YawRateConsistencyDetector(BaseDetector):
         yaw_raw    = core.get("accelSet", {}).get("yaw")
         lat_raw    = core.get("lat")
         lon_raw    = core.get("long")
-        ts_str     = meta.get("recordGeneratedAt", "")
 
         if any(v is None for v in [vehicle_id, hdg_raw, spd_raw, yaw_raw, lat_raw, lon_raw]):
             return None
@@ -87,10 +87,10 @@ class YawRateConsistencyDetector(BaseDetector):
         heading_deg    = hdg_raw * HEADING_UNIT
         speed_kmh      = spd_raw * SPEED_UNIT_MS * MS_TO_KMH
         yaw_rate_deg_s = yaw_raw * YAW_UNIT        # signed: + = right turn
-        bsm_time       = _parse_time(ts_str)
+        secmark        = _parse_secmark(core)
 
         prev = self._last.get(vehicle_id)
-        self._last[vehicle_id] = (heading_deg, lat, lon, bsm_time)
+        self._last[vehicle_id] = (heading_deg, lat, lon, secmark)
 
         if prev is None:
             return None
@@ -98,13 +98,13 @@ class YawRateConsistencyDetector(BaseDetector):
         if speed_kmh < MIN_SPEED_KMH:
             return None
 
-        prev_heading, prev_lat, prev_lon, prev_time = prev
+        prev_heading, prev_lat, prev_lon, prev_secmark = prev
 
-        if bsm_time is None or prev_time is None:
+        if secmark is None or prev_secmark is None:
             return None
 
-        elapsed_s = (bsm_time - prev_time).total_seconds()
-        if elapsed_s <= 0 or elapsed_s > MAX_GAP_SECONDS:
+        elapsed_s = _secmark_elapsed_s(prev_secmark, secmark)
+        if elapsed_s < MIN_GAP_SECONDS or elapsed_s > MAX_GAP_SECONDS:
             return None
 
         distance_m = _haversine_m(prev_lat, prev_lon, lat, lon)

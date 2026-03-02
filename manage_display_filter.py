@@ -81,23 +81,43 @@ def build_filter(level2: dict) -> dict:
     For each misbehavior type, ALL listed field conditions must match (AND).
     Any misbehavior type can satisfy the filter (OR across types).
 
-    Example — thresholds.json entry:
+    A field condition can be:
+      - a dict  → single range clause (ANDed with the rest)
+      - a list  → multiple range clauses ORed together for that field
+
+    Example — single condition (AND):
         "position_jump": {
-            "jump_m":            {"gte": 1000},
-            "implied_speed_kmh": {"gte": 300}
+            "jump_m": {"gte": 1000}
         }
     Becomes:
         {"bool": {"filter": [
             {"term":  {"misbehavior": "position_jump"}},
-            {"range": {"jump_m":            {"gte": 1000}}},
-            {"range": {"implied_speed_kmh": {"gte": 300}}}
+            {"range": {"jump_m": {"gte": 1000}}}
+        ]}}
+
+    Example — list condition (OR on same field):
+        "speed_position_inconsistency": {
+            "diff_kmh": [{"gte": 500}, {"lte": -500}]
+        }
+    Becomes:
+        {"bool": {"filter": [
+            {"term": {"misbehavior": "speed_position_inconsistency"}},
+            {"bool": {"should": [
+                {"range": {"diff_kmh": {"gte":  500}}},
+                {"range": {"diff_kmh": {"lte": -500}}}
+            ], "minimum_should_match": 1}}
         ]}}
     """
     should_clauses = []
     for mtype, field_conditions in level2.items():
         filters = [{"term": {"misbehavior": mtype}}]
         for field, condition in field_conditions.items():
-            filters.append({"range": {field: condition}})
+            if isinstance(condition, list):
+                filters.append({"bool": {"should": [
+                    {"range": {field: c}} for c in condition
+                ], "minimum_should_match": 1}})
+            else:
+                filters.append({"range": {field: condition}})
         should_clauses.append({"bool": {"filter": filters}})
 
     return {
@@ -146,6 +166,18 @@ def push_alias(es: Elasticsearch, filter_query: dict, dry_run: bool = False) -> 
         print(json.dumps({"actions": actions}, indent=2))
         print("\n[dry-run] Not pushed to Elasticsearch.")
         return
+
+    # update_aliases requires at least one concrete index matching SOURCE_INDEX.
+    # If none exists yet (e.g. after a fresh delete), create a placeholder so
+    # the alias can be established before the first detector run.
+    try:
+        hits = es.cat.indices(index=SOURCE_INDEX, h="index").body.strip()
+    except Exception:
+        hits = ""
+    if not hits:
+        base_index = SOURCE_INDEX.rstrip("*").rstrip("-")
+        es.indices.create(index=base_index, ignore=400)
+        print(f"  Created placeholder index '{base_index}'.")
 
     es.indices.update_aliases(body={"actions": actions})
     print(f"✓ Alias '{ALIAS_NAME}' → '{SOURCE_INDEX}' created/updated.")

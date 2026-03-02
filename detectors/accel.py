@@ -6,9 +6,9 @@ BSM accelSet.long field (SAE J2735):
   - Range: -2000 to 2000  (negative = deceleration)
   - 2001 = unavailable
 
-Threshold: 0.7 g  (1 g = 9.80665 m/s²)
-  0.7 × 9.80665 = 6.8647 m/s²  →  raw threshold = 686.47
-  Flag when |raw| > 686.47, i.e. |raw| ≥ 687
+Threshold: 1.0 g  (1 g = 9.80665 m/s²)
+  1.0 × 9.80665 = 9.80665 m/s²  →  raw threshold = 980.665
+  Flag when |raw| > 980.665, i.e. |raw| ≥ 981
 """
 
 from typing import Optional

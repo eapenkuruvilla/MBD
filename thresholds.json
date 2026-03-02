@@ -18,6 +18,8 @@
     "  { \"gt\":  X }  →  field >  X",
     "  { \"lt\":  X }  →  field <  X",
     "Multiple conditions on the same field are AND-ed together.",
+    "A list of conditions on the same field are OR-ed together, e.g.:",
+    "  \"diff_kmh\": [{\"gte\": 500}, {\"lte\": -500}]  →  diff >= 500 OR diff <= -500",
     "",
     "Run  python manage_display_filter.py --show  to inspect the live alias."
   ],
@@ -29,34 +31,31 @@
     },
 
     "accel_exceeded": {
-      "accel_g": { "gte": 2.0 }
+      "accel_g": { "gte": 1.5 }
     },
 
     "position_jump": {
-      "jump_m":            { "gte": 800 },
-      "implied_speed_kmh": { "gte": 10  }
+      "jump_m": { "gte": 800 }
     },
 
     "heading_inconsistency": {
-      "heading_diff": { "gte": 179.99},
-      "distance_m":   { "gte": 5  }
+      "heading_diff": { "gte": 179.99 }
     },
 
     "implausible_heading_change_rate": {
-      "heading_rate_deg_s": { "gte": 50000 }
+      "heading_rate_deg_s": { "gte": 2000 }
     },
 
     "speed_position_inconsistency": {
-      "abs_diff_kmh": { "gte": 500 },
-      "distance_m":   { "gte": 10 }
+      "diff_kmh": [{ "gte": 20000 }, { "lte": -20000 }]
     },
 
     "speed_accel_inconsistency": {
-      "error_kmh": { "gte": 150 }
+      "error_kmh": { "gte": 110 }
     },
 
     "yaw_rate_inconsistency": {
-      "yaw_diff_deg_s": { "gte": 50000 }
+      "yaw_diff_deg_s": { "gte": 2000 }
     },
 
     "brakes_on_no_decel": {

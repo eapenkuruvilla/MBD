@@ -12,42 +12,41 @@ or timestamp) has been spoofed or is severely corrupted.
 
 Thresholds
 ----------
-MAX_DELTA_ERROR_MS : 0.50  — allowed |observed_Δspeed − expected_Δspeed| in m/s;
+MAX_DELTA_ERROR_MS  : 5.0  — allowed |observed_Δspeed − expected_Δspeed| in m/s;
                              set above the p99 (0.40 m/s) of clean consecutive pairs
-MAX_GAP_SECONDS    : 2.0   — gaps longer than this are skipped; the linear
+MAX_GAP_SECONDS     : 0.15 — gaps longer than this are skipped; the linear
                              integration assumption breaks down over long intervals
-MIN_DELTA_SPEED_MS : 0.10  — require a meaningful speed change before flagging;
+MIN_DELTA_SPEED_KMH : 20.0 — require a meaningful speed change before flagging;
                              filters noise when the vehicle is nearly constant-speed
 """
 
 from typing import Optional
 
 from .utils import (
-    _parse_time, BaseDetector,
+    _parse_secmark, _secmark_elapsed_s, BaseDetector,
     SPEED_UNIT_MS, SPEED_UNAVAILABLE, ACCEL_UNIT_MS2, ACCEL_UNAVAILABLE, MS_TO_KMH,
 )
 
-MAX_DELTA_ERROR_MS = 5.0
-MAX_GAP_SECONDS    = 0.15
+MAX_DELTA_ERROR_MS  = 5.0
+MIN_GAP_SECONDS     = 0.05
+MAX_GAP_SECONDS     = 0.15
 MIN_DELTA_SPEED_KMH = 20.0
-MIN_DELTA_SPEED_MS = MIN_DELTA_SPEED_KMH / MS_TO_KMH
+MIN_DELTA_SPEED_MS  = MIN_DELTA_SPEED_KMH / MS_TO_KMH
 
 
 class SpeedAccelConsistencyDetector(BaseDetector):
     """Stateful detector — tracks last speed/accel/time per vehicle."""
 
     def __init__(self):
-        # vehicle_id -> (speed_ms, accel_ms2, datetime)
+        # vehicle_id -> (speed_ms, accel_ms2, secmark)
         super().__init__()
 
     def check(self, bsm: dict) -> Optional[dict]:
-        meta = bsm.get("metadata", {})
         core = bsm.get("payload", {}).get("data", {}).get("coreData", {})
 
         vehicle_id = core.get("id")
         spd_raw    = core.get("speed")
         acc_raw    = core.get("accelSet", {}).get("long")
-        ts_str     = meta.get("recordGeneratedAt", "")
 
         if any(v is None for v in [vehicle_id, spd_raw, acc_raw]):
             return None
@@ -63,21 +62,21 @@ class SpeedAccelConsistencyDetector(BaseDetector):
 
         speed_ms  = spd_raw * SPEED_UNIT_MS
         accel_ms2 = acc_raw * ACCEL_UNIT_MS2
-        bsm_time  = _parse_time(ts_str)
+        secmark   = _parse_secmark(core)
 
         prev = self._last.get(vehicle_id)
-        self._last[vehicle_id] = (speed_ms, accel_ms2, bsm_time)
+        self._last[vehicle_id] = (speed_ms, accel_ms2, secmark)
 
         if prev is None:
             return None
 
-        prev_speed_ms, prev_accel_ms2, prev_time = prev
+        prev_speed_ms, prev_accel_ms2, prev_secmark = prev
 
-        if bsm_time is None or prev_time is None:
+        if secmark is None or prev_secmark is None:
             return None
 
-        elapsed_s = (bsm_time - prev_time).total_seconds()
-        if elapsed_s <= 0 or elapsed_s > MAX_GAP_SECONDS:
+        elapsed_s = _secmark_elapsed_s(prev_secmark, secmark)
+        if elapsed_s < MIN_GAP_SECONDS or elapsed_s > MAX_GAP_SECONDS:
             return None
 
         observed_delta  = speed_ms - prev_speed_ms

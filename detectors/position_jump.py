@@ -7,37 +7,37 @@ maximum, indicating a position spoof or severe data error.
 
 Thresholds
 ----------
-MAX_JUMP_SPEED_KMH : 160  — implied speed above this is flagged
-MIN_JUMP_METERS    :  50  — jump must be at least this large;
+MAX_JUMP_SPEED_KMH :  10  — implied speed above this is flagged
+MIN_JUMP_METERS    : 100  — jump must be at least this large;
                             filters out GPS noise on tiny Δt
-MAX_GAP_SECONDS    :  60  — gaps longer than this are skipped; the vehicle
+MIN_GAP_SECONDS    : 0.05 — pairs closer than this are timing artifacts
+MAX_GAP_SECONDS    : 0.15 — gaps longer than this are skipped; the vehicle
                             may have legitimately reappeared elsewhere
 """
 
 from typing import Optional
 
-from .utils import _haversine_m, _parse_time, BaseDetector, LAT_SCALE, LON_SCALE, MS_TO_KMH
+from .utils import _haversine_m, _parse_secmark, _secmark_elapsed_s, BaseDetector, LAT_SCALE, LON_SCALE, MS_TO_KMH
 
 MAX_JUMP_SPEED_KMH = 10.0  # km/h — implied speed must exceed this
-MIN_JUMP_METERS    = 100.0   # m    — filters out GPS noise on tiny Δt
-MAX_GAP_SECONDS    = 0.15   # s    — ignore gaps longer than this
+MIN_JUMP_METERS    = 100.0  # m    — filters out GPS noise on tiny Δt
+MIN_GAP_SECONDS    =  0.05  # s    — pairs closer than this are timing artifacts
+MAX_GAP_SECONDS    =  0.15  # s    — ignore gaps longer than this
 
 
 class PositionJumpDetector(BaseDetector):
     """Stateful detector — tracks the last known position per vehicle."""
 
     def __init__(self):
-        # vehicle_id -> (lat, lon, datetime)
+        # vehicle_id -> (lat, lon, secmark)
         super().__init__()
 
     def check(self, bsm: dict) -> Optional[dict]:
-        meta = bsm.get("metadata", {})
         core = bsm.get("payload", {}).get("data", {}).get("coreData", {})
 
         vehicle_id = core.get("id")
         lat_raw    = core.get("lat")
         lon_raw    = core.get("long")
-        ts_str     = meta.get("recordGeneratedAt", "")
 
         if vehicle_id is None or lat_raw is None or lon_raw is None:
             return None
@@ -48,23 +48,23 @@ class PositionJumpDetector(BaseDetector):
         except (ValueError, TypeError):
             return None
 
-        bsm_time = _parse_time(ts_str)
+        secmark = _parse_secmark(core)
 
         prev = self._last.get(vehicle_id)
-        self._last[vehicle_id] = (lat, lon, bsm_time)
+        self._last[vehicle_id] = (lat, lon, secmark)
 
         if prev is None:
             return None  # first message for this vehicle — nothing to compare
 
-        prev_lat, prev_lon, prev_time = prev
+        prev_lat, prev_lon, prev_secmark = prev
 
-        if bsm_time is None or prev_time is None:
+        if secmark is None or prev_secmark is None:
             return None
 
-        elapsed_s = (bsm_time - prev_time).total_seconds()
+        elapsed_s = _secmark_elapsed_s(prev_secmark, secmark)
 
-        if elapsed_s <= 0 or elapsed_s > MAX_GAP_SECONDS:
-            return None  # out-of-order or gap too large
+        if elapsed_s < MIN_GAP_SECONDS or elapsed_s > MAX_GAP_SECONDS:
+            return None  # timing artifact, out-of-order, or gap too large
 
         distance_m   = _haversine_m(prev_lat, prev_lon, lat, lon)
         implied_kmh  = (distance_m / elapsed_s) * MS_TO_KMH

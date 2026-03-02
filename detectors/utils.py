@@ -9,7 +9,7 @@ Centralises:
 
 import math
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Tuple
 
 # ---------------------------------------------------------------------------
 # SAE J2735 encoding constants
@@ -29,6 +29,7 @@ SPEED_UNAVAILABLE   = 8191
 HEADING_UNAVAILABLE = 28800
 YAW_UNAVAILABLE     = 32767
 ACCEL_UNAVAILABLE   = 2001
+SECMARK_UNAVAILABLE = 65535  # J2735 DSSecond: valid range 0–59999 ms
 
 
 # ---------------------------------------------------------------------------
@@ -75,6 +76,30 @@ def _parse_time(ts: str) -> Optional[datetime]:
         return datetime.fromisoformat(clean.replace("Z", "+00:00"))
     except ValueError:
         return None
+
+
+def _parse_secmark(core: dict) -> Optional[int]:
+    """Return coreData.secMark (0–59999 ms) or None if missing/unavailable."""
+    raw = core.get("secMark")
+    if raw is None:
+        return None
+    try:
+        val = int(raw)
+    except (ValueError, TypeError):
+        return None
+    if val == SECMARK_UNAVAILABLE or not (0 <= val <= 59999):
+        return None
+    return val
+
+
+def _secmark_elapsed_s(prev: int, curr: int) -> float:
+    """
+    Elapsed time in seconds between two secMark values (0–59999 ms).
+    Handles the once-per-minute wraparound (59999 → 0) via modulo 60000.
+    Out-of-order messages produce a large value (≈ 60 s) and are naturally
+    rejected by callers' MAX_GAP_SECONDS guard.
+    """
+    return ((curr - prev) % 60000) / 1000.0
 
 
 # ---------------------------------------------------------------------------
