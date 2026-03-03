@@ -887,9 +887,9 @@ Kubernetes cluster.  In that model:
 - **Agents** run inside the ODE cluster, one per data source or geographic
   region.  Each agent continuously consumes BSM streams from the ODE and runs
   the misbehavior detectors in near-real time.
-- **Multiple agents push concurrently** to a central ELK (or OpenSearch)
-  server.  Elasticsearch's native horizontal scaling handles concurrent
-  ingest without coordination between agents.
+- **Each agent writes misbehavior events to a local JSON-lines log file.**
+  A Filebeat sidecar tails the file and ships events to the central Logstash
+  instance — agents have no direct connection to Elasticsearch.
 - **Logstash** (or OpenSearch's Data Prepper) acts as the ingest layer,
   providing buffering, back-pressure handling, and field normalisation before
   events reach Elasticsearch.
@@ -898,17 +898,86 @@ Key changes required relative to the current design:
 
 | Concern | Current | Production |
 |---|---|---|
-| Input | ZIP/NDJSON file | Kafka topic or ODE REST/WebSocket stream |
+| Input | ZIP/NDJSON file | ODE BSM stream (REST/WebSocket) |
 | Execution | Single process, one machine | Kubernetes `Deployment` with N replicas |
-| Output | JSON-lines log → Logstash | Direct ES ingest or Kafka → Logstash |
+| Output | JSON-lines log → Logstash | JSON-lines log → **Filebeat** → Logstash → ES |
 | State (stateful detectors) | In-process Python dict | Shared store (Redis or ES itself) |
 | Index naming | `mbd-misbehaviors` | Data stream with ILM rollover policy |
 
+#### Recommended ingest path: agent → Filebeat → Logstash → ES
+
+The agent (detector process) writes misbehavior events to a local JSON-lines
+log file, exactly as it does today.  **Filebeat** runs as a sidecar container
+in the same Kubernetes pod, tails the log file, and ships events to the
+central Logstash instance.  This approach:
+
+- **Keeps the agent simple** — no ES client code, no network retry logic.
+- **Decouples transport from detection** — Filebeat handles back-pressure,
+  retries, and TLS without any changes to detector code.
+- **Matches the current architecture** — the existing Logstash pipeline and
+  Elasticsearch index template require no changes.
+- **Scales naturally** — each agent pod has its own Filebeat sidecar; all
+  sidecars fan-in to the same Logstash endpoint.
+
+```
+ODE BSM stream
+      │
+      ▼
+ Agent pod (Kubernetes)
+ ┌─────────────────────────────┐
+ │  detector.py → misbehaviors │
+ │  .log (JSON-lines)          │
+ │          │                  │
+ │   Filebeat sidecar ─────────┼──► Logstash ──► Elasticsearch ──► Kibana
+ └─────────────────────────────┘
+```
+
+#### Eliminating shared state with pinned routing
+
 The stateful detectors (position jump, heading, yaw, speed/accel consistency)
-currently keep per-vehicle state in a Python dictionary.  In a multi-replica
-deployment, BSMs from the same vehicle may arrive at different replicas, so
-state must be externalised to a shared store such as **Redis** (low latency)
-or written back to Elasticsearch between messages.
+keep per-vehicle state in a Python dictionary.  In a naive multi-replica
+deployment, BSMs from the same vehicle could arrive at different replicas,
+corrupting state.
+
+This can be avoided without Redis by **pinning each Filebeat instance to a
+dedicated Logstash replica** and configuring the ODE to route BSMs from a
+given geographic region or vehicle ID range to the same agent pod.  Because
+each Logstash replica then sees a consistent subset of vehicles, per-vehicle
+state stays in-process with no shared store required.
+
+```
+ODE region A ──► Agent pod A ──► Filebeat A ──► Logstash replica A ──┐
+ODE region B ──► Agent pod B ──► Filebeat B ──► Logstash replica B ──┼──► ES ──► Kibana
+ODE region C ──► Agent pod C ──► Filebeat C ──► Logstash replica C ──┘
+```
+
+Filebeat's `output.logstash` supports a static `hosts` list, so pinning is
+simply a matter of pointing each Filebeat sidecar at a specific Logstash
+`ClusterIP` or pod DNS name in the Kubernetes manifest.  The Logstash replicas
+do not need to communicate with each other, and ES handles fan-in from all
+replicas without coordination.
+
+#### Index Lifecycle Management (ILM)
+
+In a continuous ODE deployment, misbehavior events accumulate indefinitely.
+**ILM** is an Elasticsearch feature that automatically manages index size and
+age by moving data through a series of phases:
+
+| Phase | Description |
+|---|---|
+| **Hot** | Active writes and fast reads |
+| **Warm** | Read-only; compressed to slower, cheaper storage |
+| **Cold** | Rarely accessed; further compressed |
+| **Delete** | Automatically removed after a configured retention period |
+
+Rollover rules trigger a transition to a new index when the current one
+exceeds a size limit (e.g., 50 GB), a document count, or a time threshold
+(e.g., 30 days).  This keeps individual indices at a manageable size and
+query performance consistent over time.
+
+The current MBD setup uses date-suffixed indices (`mbd-misbehaviors-YYYY.MM.DD`)
+as a simple manual approximation of the same idea; ILM would automate and
+generalise this for a production deployment.
 
 ---
 
