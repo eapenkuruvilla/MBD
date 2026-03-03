@@ -20,7 +20,8 @@ anomalous behaviour, and visualises findings in Kibana.
 10. [Network Access & Security](#network-access--security)
 11. [Troubleshooting](#troubleshooting)
 12. [Development: Unit Tests](#development-unit-tests)
-13. [Project Structure](#project-structure)
+13. [Future Work](#future-work)
+14. [Project Structure](#project-structure)
 
 ---
 
@@ -803,6 +804,76 @@ bsm = make_bsm(
     wheel_brakes="00000",
 )
 ```
+
+---
+
+## Future Work
+
+### Platform: migrate to OpenSearch
+
+The current stack uses Elasticsearch and Kibana under the **Elastic Basic**
+license, which is free but has notable restrictions:
+
+- **Kibana Controls** (range sliders for interactive threshold filtering)
+  require a Gold/Platinum license.
+- Certain security features (TLS, role-based access control) also require
+  a paid tier.
+
+**OpenSearch** (Apache 2.0 licence, fork of ES 7.10 / Kibana 7.10) includes
+all of these features at no cost.  Migration is largely a matter of swapping
+Docker images (`elasticsearch` → `opensearchproject/opensearch`,
+`kibana` → `opensearchproject/opensearch-dashboards`) and adjusting a handful
+of API paths.  Doing so would allow interactive Controls panels for the
+L2 threshold sliders directly in the dashboard, removing the need to edit
+`thresholds.json` and rerun `make filter`.
+
+---
+
+### Detectors: candidates for future implementation
+
+#### Frozen / Replayed BSM
+
+If a vehicle sends the same latitude, longitude, speed, and heading for N
+consecutive messages with non-trivial time elapsed, the data is either frozen
+(sensor failure) or replayed (attack).  Implementation is a simple stateful
+counter per vehicle — no geometry required.
+
+#### Message Counter Anomaly (`msg_cnt`)
+
+The `msg_cnt` field is a 1-byte wrapping counter (0–127).  If it goes
+backwards, repeats, or jumps by a large amount without a wrap, it signals
+replayed or injected messages.  Can be implemented as a stateful check
+alongside the existing heading/position detectors.
+
+#### msgCount Discontinuity
+
+The `msgCount` field increments by 1 each transmission and wraps at 127.  A
+non-sequential jump (e.g., 42 → 99) for the same vehicle ID indicates a replay
+attack or injected message.  Similar to the message counter anomaly detector
+but targets a different field with different wrap semantics.
+
+#### BSM Frequency Anomaly
+
+SAE J2735 specifies ~10 Hz broadcast rate.  A vehicle sending 200 msg/s is
+flooding the channel; 0.1 msg/s is suspiciously slow.  Requires a sliding time
+window per vehicle to compute the observed message rate and compare it against
+configurable bounds.
+
+#### Stale / Replayed Timestamp
+
+Flag BSMs whose `recordGeneratedAt` timestamp is significantly older than the
+median or current processing time (e.g., > 10 seconds behind).  A classic
+replay attack indicator that requires no per-vehicle state — just a comparison
+against a rolling reference time.
+
+#### Sybil Detection (Co-location)
+
+Multiple distinct vehicle IDs reporting positions within a very small radius
+(e.g., < 5 m) at the same time.  One physical device impersonating several
+virtual vehicles is a **Sybil attack** — a major V2X security threat.
+Implementation requires a spatial index (e.g., geohash bucketing) over all
+active vehicles in each time window, making it the most computationally
+intensive candidate on this list.
 
 ---
 
