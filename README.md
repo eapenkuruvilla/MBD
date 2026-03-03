@@ -877,6 +877,41 @@ intensive candidate on this list.
 
 ---
 
+### Architecture: distributed ODE deployment
+
+The current implementation processes a single ZIP/NDJSON file on one machine.
+A production deployment would integrate with the
+**USDOT Operational Data Environment (ODE)**, which runs as a distributed
+Kubernetes cluster.  In that model:
+
+- **Agents** run inside the ODE cluster, one per data source or geographic
+  region.  Each agent continuously consumes BSM streams from the ODE and runs
+  the misbehavior detectors in near-real time.
+- **Multiple agents push concurrently** to a central ELK (or OpenSearch)
+  server.  Elasticsearch's native horizontal scaling handles concurrent
+  ingest without coordination between agents.
+- **Logstash** (or OpenSearch's Data Prepper) acts as the ingest layer,
+  providing buffering, back-pressure handling, and field normalisation before
+  events reach Elasticsearch.
+
+Key changes required relative to the current design:
+
+| Concern | Current | Production |
+|---|---|---|
+| Input | ZIP/NDJSON file | Kafka topic or ODE REST/WebSocket stream |
+| Execution | Single process, one machine | Kubernetes `Deployment` with N replicas |
+| Output | JSON-lines log → Logstash | Direct ES ingest or Kafka → Logstash |
+| State (stateful detectors) | In-process Python dict | Shared store (Redis or ES itself) |
+| Index naming | `mbd-misbehaviors` | Data stream with ILM rollover policy |
+
+The stateful detectors (position jump, heading, yaw, speed/accel consistency)
+currently keep per-vehicle state in a Python dictionary.  In a multi-replica
+deployment, BSMs from the same vehicle may arrive at different replicas, so
+state must be externalised to a shared store such as **Redis** (low latency)
+or written back to Elasticsearch between messages.
+
+---
+
 ## Project Structure
 
 ```
