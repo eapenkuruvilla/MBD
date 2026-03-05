@@ -205,6 +205,23 @@ def _kibana_get(kibana_url: str, path: str) -> dict:
         raise RuntimeError(f"Kibana GET {path} → HTTP {exc.code}: {body_text}") from exc
 
 
+def _kibana_put(kibana_url: str, path: str, body: dict) -> None:
+    """PUT to Kibana API."""
+    import urllib.request
+    import urllib.error
+
+    url  = kibana_url.rstrip("/") + path
+    data = json.dumps(body).encode()
+    req  = urllib.request.Request(url, data=data,
+                                  headers=_kibana_headers(), method="PUT")
+    try:
+        with urllib.request.urlopen(req) as resp:
+            resp.read()
+    except urllib.error.HTTPError as exc:
+        body_text = exc.read().decode(errors="replace")
+        raise RuntimeError(f"Kibana PUT {path} → HTTP {exc.code}: {body_text}") from exc
+
+
 def create_kibana_data_view(kibana_url: str) -> None:
     """Create (or silently skip if already present) the mbd-display data view."""
     body = {
@@ -218,6 +235,44 @@ def create_kibana_data_view(kibana_url: str) -> None:
     }
     _kibana_post(kibana_url, "/api/data_views/data_view", body)
     print(f"✓ Kibana data view '{DATA_VIEW_TITLE}' ({DATA_VIEW_ID}) created/updated.")
+
+
+# Runtime fields needed by dashboard panels.
+# Null guards are required because most misbehavior types don't emit these fields.
+_RUNTIME_FIELDS = [
+    (
+        "decel_g_abs",
+        "double",
+        "if (doc.containsKey('accel_g') && !doc['accel_g'].empty) "
+        "{ emit(Math.abs(doc['accel_g'].value)); }",
+    ),
+    (
+        "diff_abs_kmh",
+        "double",
+        "if (doc.containsKey('diff_kmh') && !doc['diff_kmh'].empty) "
+        "{ emit(Math.abs(doc['diff_kmh'].value)); }",
+    ),
+]
+
+# Runtime fields must be added to both data views:
+#   mbd-data-view    → used by the unfiltered dashboard
+#   mbd-display-view → used by the filtered (Main) dashboard
+_RUNTIME_FIELD_DATA_VIEWS = ["mbd-data-view", "mbd-display-view"]
+
+
+def register_runtime_fields(kibana_url: str) -> None:
+    """Add computed runtime fields to both Kibana data views."""
+    for dv_id in _RUNTIME_FIELD_DATA_VIEWS:
+        path = f"/api/data_views/data_view/{dv_id}/runtime_field"
+        for name, ftype, source in _RUNTIME_FIELDS:
+            try:
+                _kibana_put(kibana_url, path, {
+                    "name": name,
+                    "runtimeField": {"type": ftype, "script": {"source": source}},
+                })
+                print(f"✓ Runtime field '{name}' registered on {dv_id}")
+            except RuntimeError as exc:
+                print(f"  Warning: {exc}")
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
@@ -276,6 +331,8 @@ def main():
     if args.setup_kibana and not args.dry_run:
         print()
         create_kibana_data_view(args.kibana_url)
+        print()
+        register_runtime_fields(args.kibana_url)
 
     if not args.dry_run:
         print()
