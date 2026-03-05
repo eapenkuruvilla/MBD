@@ -981,6 +981,97 @@ generalise this for a production deployment.
 
 ---
 
+### Detectors: coverage gaps in existing logic
+
+The current detectors flag individual BSMs in isolation or against a single
+previous message.  Several attack patterns are not yet covered:
+
+- **Replay / frozen BSM** — a vehicle sending identical position, speed, and
+  heading across many consecutive messages with non-trivial time elapsed.
+  Already listed as a candidate detector above; also manifests as a gap in
+  the stateful detectors which only compare adjacent pairs.
+- **Cross-vehicle Sybil detection** — one physical device impersonating
+  multiple vehicle IDs at nearby positions (< 5 m apart, same time window).
+  Requires a spatial index across all active vehicles, not just per-vehicle
+  state.  Already listed above; noted here because it is the most significant
+  undetected attack class.
+- **Gradual drift attacks** — an attacker who increments position or speed
+  slightly each message can stay under the per-step threshold indefinitely.
+  Accumulating error over a rolling window (e.g., 10-message sliding sum)
+  would catch this class.
+
+---
+
+### Detectors: per-vehicle behavioural baselines
+
+All current thresholds are **global** — the same limit applies to every
+vehicle regardless of type (car, truck, motorcycle) or context (highway,
+city).  A more robust approach would learn a normal behaviour profile per
+vehicle ID from the first N messages and flag deviations from that baseline
+rather than from a fixed constant.  This would significantly reduce false
+positives for edge-case vehicles while improving sensitivity for subtle
+spoofing.
+
+---
+
+### Pipeline: log rotation and duplicate ingestion
+
+**Log rotation** — `misbehaviors.log` grows indefinitely.  On `make ingest`,
+Logstash restarts from the beginning of the file, which becomes increasingly
+slow as the log grows.  A rotation policy (e.g., daily rotation, keep 7
+files) would cap ingest time.
+
+**Duplicate ingestion** — running `make ingest` twice re-ingests the entire
+log, creating duplicate records in Elasticsearch.  Assigning a deterministic
+`_id` to each ES document (e.g., a hash of `vehicle_id + secmark +
+misbehavior + detected_at`) would make writes idempotent and eliminate
+duplicates regardless of how many times Logstash restarts.
+
+---
+
+### Pipeline: streaming ingestion
+
+The current pipeline is batch: detect from a ZIP file, write a log, restart
+Logstash.  For a live ODE deployment the detector would consume a continuous
+BSM stream and write events to ES in near-real time — eliminating the log
+file and `make ingest` step entirely.  Options include:
+
+- Writing directly to ES from the detector using the Python ES client
+  (simplest, but couples detector code to ES).
+- Publishing to a Kafka topic and using Logstash's Kafka input plugin
+  (decoupled, supports back-pressure and replay).
+
+---
+
+### Operational tooling
+
+**Alerting** — the dashboards are currently observational only.  Kibana
+Alerting (Basic licence, available without Gold) can trigger notifications
+when event counts exceed a threshold — for example, paging an analyst when
+more than 50 `speed_position_inconsistency` events appear in a 5-minute
+window.  A simpler alternative is a lightweight Python script that polls ES
+on a cron schedule and sends an email or Slack message.
+
+**Dashboard drill-down** — the "All Misbehavior Events" table shows the
+maximum observed field value per vehicle × misbehavior type, but does not
+link to the individual worst event.  Adding a Kibana URL drilldown from each
+row to a pre-filtered Discover view (filtered to that vehicle ID and
+misbehavior type, sorted by the relevant field descending) would let analysts
+jump directly to the specific timestamp and coordinates of the worst event
+without manual KQL queries.
+
+**Dashboard export automation** — saving UI edits back to the NDJSON source
+files currently requires a manual `curl` command documented in the README.
+A `make export` Makefile target wrapping that command would make the
+round-trip less error-prone and easier to remember.
+
+**Stack health check** — there is no quick way to verify the stack is ready
+before running detection or ingest.  A `make status` target that checks ES
+cluster health, confirms the `mbd-display` alias exists, and verifies Kibana
+is reachable would surface misconfiguration before a long detector run.
+
+---
+
 ## Project Structure
 
 ```
