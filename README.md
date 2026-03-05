@@ -1024,7 +1024,7 @@ MBD/
 │   │   ├── config/logstash.yml
 │   │   └── pipeline/misbehaviors.conf  Logstash pipeline: parse JSON-lines → ES
 │   ├── kibana/
-│   │   ├── dashboard.ndjson      Main MBD Misbehaviors dashboard
+│   │   ├── dashboard.ndjson      Misbehavior Report - Unfiltered dashboard
 │   │   ├── display-dashboard.ndjson
 │   │   ├── display-filter.ndjson
 │   │   └── kpi-vega.ndjson       Vega KPI panel
