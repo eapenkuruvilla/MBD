@@ -12,6 +12,7 @@
 DATA    ?= $(firstword $(wildcard data/*.zip data/*.json))
 LOG     ?= logs/misbehaviors.log
 ES      ?= http://localhost:9200
+KIBANA  ?= http://localhost:5601
 COMPOSE ?= docker compose
 
 .PHONY: run filter ingest full clear fresh test help
@@ -32,7 +33,7 @@ run:
 	python detector.py "$(DATA)" --log "$(LOG)"
 
 filter:
-	python manage_display_filter.py --es-url $(ES)
+	python manage_display_filter.py --es-url $(ES) --kibana-url $(KIBANA) --setup-kibana
 
 ingest:
 	$(COMPOSE) restart logstash
@@ -48,7 +49,7 @@ clear:
 fresh: clear
 	python detector.py "$(DATA)" --log "$(LOG)" --clear
 	$(COMPOSE) restart logstash
-	python manage_display_filter.py --es-url $(ES)
+	python manage_display_filter.py --es-url $(ES) --kibana-url $(KIBANA) --setup-kibana
 
 test:
 	python -m pytest tests/ -v

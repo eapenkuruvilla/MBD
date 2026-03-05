@@ -5,9 +5,9 @@ mbd-display, which acts as a server-side pre-filter on top of the raw
 mbd-misbehaviors-* indices.  Kibana is pointed at mbd-display so analysts
 see only the higher-significance slice of the dataset by default.
 
-With --setup-kibana the script also creates the Kibana data view that
-references the alias.  Interactive Controls (range sliders) require a Gold
-license and are therefore not available in the Basic distribution.
+With --setup-kibana the script also creates the Kibana data view for the
+mbd-display alias and registers required runtime fields (decel_g_abs,
+diff_abs_kmh) on both data views.  Run after every docker compose down -v.
 
 Workflow
 --------
@@ -24,7 +24,8 @@ Usage
   --thresholds FILE    thresholds.json path (default: next to this script)
   --show               Print the currently active alias filter and exit.
   --dry-run            Print the generated filter without pushing it.
-  --setup-kibana       Also create the Kibana data view for the mbd-display alias.
+  --setup-kibana       Also create the mbd-display Kibana data view and register
+                       runtime fields on both data views (run after docker compose down -v).
 """
 
 import argparse
@@ -306,7 +307,7 @@ def parse_args():
     )
     parser.add_argument(
         "--setup-kibana", action="store_true",
-        help="Also create the mbd-display Kibana data view (run once after docker compose up)",
+        help="Create mbd-display data view and register runtime fields (run after docker compose down -v)",
     )
     return parser.parse_args()
 

@@ -95,7 +95,7 @@ make ingest
 # 4. Push the L2 display filter to Elasticsearch
 make filter
 
-# 5. Open Kibana and select the "MBD Misbehaviors" dashboard
+# 5. Open Kibana and select the "Misbehavior Report - Main" dashboard
 #    http://localhost:5601
 ```
 
@@ -474,8 +474,8 @@ Two dashboards are imported automatically on first `docker compose up`:
 
 | Dashboard | Data view | Contents |
 |---|---|---|
-| **MBD Misbehaviors** | `mbd-misbehaviors*` (all L1 events) | Maps, time series, breakdown tables |
-| **MBD Display** | `mbd-display` (L2 filtered) | Same layout, higher-confidence subset |
+| **Misbehavior Report - Main** | `mbd-display` (L2 filtered) | Maps, time series, breakdown tables — higher-confidence subset |
+| **Misbehavior Report - Unfiltered** | `mbd-misbehaviors*` (all L1 events) | Same layout, all detected events |
 
 ### Filtering within the dashboard
 
