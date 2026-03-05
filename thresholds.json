@@ -63,7 +63,7 @@
     },
 
     "decel_no_brakes": {
-      "accel_g": { "lte": -2.0 }
+      "accel_g": { "lte": -1.0 }
     }
 
   }
