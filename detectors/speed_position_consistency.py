@@ -107,6 +107,7 @@ class SpeedPositionConsistencyDetector(BaseDetector):
             "reported_speed_kmh": round(speed_kmh, 2),
             "implied_speed_kmh":  round(implied_kmh, 2),
             "diff_kmh":           round(diff_kmh, 2),
+            "diff_abs_kmh":       round(abs(diff_kmh), 2),
             "threshold_kmh":      MAX_SPEED_DIFF_KMH,
             "distance_m":         round(distance_m, 1),
             "elapsed_s":          round(elapsed_s, 3),
