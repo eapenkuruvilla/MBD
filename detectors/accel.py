@@ -15,7 +15,7 @@ from typing import Optional
 
 from .utils import ACCEL_UNAVAILABLE, ACCEL_UNIT_MS2, G_MS2
 
-THRESHOLD_G = 1.0
+THRESHOLD_G = 1.5
 THRESHOLD_MS2 = THRESHOLD_G * G_MS2
 
 

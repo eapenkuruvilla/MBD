@@ -10,34 +10,41 @@ Thresholds
 ----------
 MAX_HEADING_RATE_DEG_S : 90.0  — heading change rate above this is flagged;
                                  the empirical maximum in clean data is 65.9 °/s
-MIN_SPEED_KMH          : 10.0  — only check when actually moving; heading
-                                 is effectively undefined at near-zero speed
+SPEED_GATE_KMH         : 20.0  — skip if EITHER the current or previous message
+                                 speed is below this; heading is effectively
+                                 undefined at low speed and turns are frequent
+MAX_GPS_ACCURACY_M     :  5.0  — skip if positional accuracy (semiMajor) exceeds
+                                 this; poor GPS fixes inflate derived heading rates
 MIN_GAP_SECONDS        : 0.05  — pairs closer than this are timing artifacts
 MAX_GAP_SECONDS        : 0.15  — gaps longer than this are skipped; a legitimate
                                  large turn could occur during a long gap
 MIN_DISTANCE_M         :  5.0  — require some displacement to rule out GPS jitter
+CONFIRM_N              :  2    — consecutive violations required before flagging
+                                 (inherited from BaseDetector)
 """
 
 from typing import Optional
 
 from .utils import (
-    _haversine_m, _angular_diff, _parse_secmark, _secmark_elapsed_s, BaseDetector,
+    _haversine_m, _angular_diff, _parse_secmark, _secmark_elapsed_s,
+    _parse_accuracy_m, BaseDetector,
     LAT_SCALE, LON_SCALE, HEADING_UNIT, HEADING_UNAVAILABLE,
     SPEED_UNIT_MS, SPEED_UNAVAILABLE, MS_TO_KMH,
 )
 
 MAX_HEADING_RATE_DEG_S = 90.0
-MIN_SPEED_KMH          = 10.0
+SPEED_GATE_KMH         = 20.0   # km/h — applied to both current and previous speed
+MAX_GPS_ACCURACY_M     =  5.0   # metres
 MIN_GAP_SECONDS        =  0.05
 MAX_GAP_SECONDS        =  0.15
 MIN_DISTANCE_M         =  5.0
 
 
 class HeadingChangeRateDetector(BaseDetector):
-    """Stateful detector — tracks last heading/position/time per vehicle."""
+    """Stateful detector — tracks last heading/position/speed/time per vehicle."""
 
     def __init__(self):
-        # vehicle_id -> (heading_deg, lat, lon, secmark)
+        # vehicle_id -> (heading_deg, lat, lon, secmark, speed_kmh)
         super().__init__()
 
     def check(self, bsm: dict) -> Optional[dict]:
@@ -68,15 +75,21 @@ class HeadingChangeRateDetector(BaseDetector):
         secmark     = _parse_secmark(core)
 
         prev = self._last.get(vehicle_id)
-        self._last[vehicle_id] = (heading_deg, lat, lon, secmark)
+        self._last[vehicle_id] = (heading_deg, lat, lon, secmark, speed_kmh)
 
         if prev is None:
             return None
 
-        if speed_kmh < MIN_SPEED_KMH:
+        prev_heading, prev_lat, prev_lon, prev_secmark, prev_speed_kmh = prev
+
+        # Speed gate — skip if either end of the interval was slow
+        if speed_kmh < SPEED_GATE_KMH or prev_speed_kmh < SPEED_GATE_KMH:
             return None
 
-        prev_heading, prev_lat, prev_lon, prev_secmark = prev
+        # GPS accuracy gate
+        accuracy_m = _parse_accuracy_m(core)
+        if accuracy_m is not None and accuracy_m > MAX_GPS_ACCURACY_M:
+            return None
 
         if secmark is None or prev_secmark is None:
             return None
@@ -93,6 +106,10 @@ class HeadingChangeRateDetector(BaseDetector):
         heading_rate     = heading_diff_deg / elapsed_s   # °/s
 
         if heading_rate <= MAX_HEADING_RATE_DEG_S:
+            self._reset_streak(vehicle_id)
+            return None
+
+        if self._increment_streak(vehicle_id) < self.CONFIRM_N:
             return None
 
         return {

@@ -7,20 +7,28 @@ maximum, indicating a position spoof or severe data error.
 
 Thresholds
 ----------
-MAX_JUMP_SPEED_KMH :  10  — implied speed above this is flagged
-MIN_JUMP_METERS    : 100  — jump must be at least this large;
-                            filters out GPS noise on tiny Δt
-MIN_GAP_SECONDS    : 0.05 — pairs closer than this are timing artifacts
-MAX_GAP_SECONDS    : 0.15 — gaps longer than this are skipped; the vehicle
-                            may have legitimately reappeared elsewhere
+MAX_JUMP_SPEED_KMH :  10   — implied speed above this is flagged
+MIN_JUMP_METERS    : 100   — jump must be at least this large;
+                             filters out GPS noise on tiny Δt
+MAX_GPS_ACCURACY_M :   5   — skip if positional accuracy (semiMajor) exceeds
+                             this; a poor GPS fix can look like a position jump
+MIN_GAP_SECONDS    : 0.05  — pairs closer than this are timing artifacts
+MAX_GAP_SECONDS    : 0.15  — gaps longer than this are skipped; the vehicle
+                             may have legitimately reappeared elsewhere
+CONFIRM_N          :   2   — consecutive violations required before flagging
+                             (inherited from BaseDetector)
 """
 
 from typing import Optional
 
-from .utils import _haversine_m, _parse_secmark, _secmark_elapsed_s, BaseDetector, LAT_SCALE, LON_SCALE, MS_TO_KMH
+from .utils import (
+    _haversine_m, _parse_secmark, _secmark_elapsed_s, _parse_accuracy_m,
+    BaseDetector, LAT_SCALE, LON_SCALE, MS_TO_KMH,
+)
 
-MAX_JUMP_SPEED_KMH = 10.0  # km/h — implied speed must exceed this
+MAX_JUMP_SPEED_KMH = 10.0   # km/h — implied speed must exceed this
 MIN_JUMP_METERS    = 100.0  # m    — filters out GPS noise on tiny Δt
+MAX_GPS_ACCURACY_M =   5.0  # m    — skip if positional fix is too poor
 MIN_GAP_SECONDS    =  0.05  # s    — pairs closer than this are timing artifacts
 MAX_GAP_SECONDS    =  0.15  # s    — ignore gaps longer than this
 
@@ -54,7 +62,7 @@ class PositionJumpDetector(BaseDetector):
         self._last[vehicle_id] = (lat, lon, secmark)
 
         if prev is None:
-            return None  # first message for this vehicle — nothing to compare
+            return None
 
         prev_lat, prev_lon, prev_secmark = prev
 
@@ -62,14 +70,22 @@ class PositionJumpDetector(BaseDetector):
             return None
 
         elapsed_s = _secmark_elapsed_s(prev_secmark, secmark)
-
         if elapsed_s < MIN_GAP_SECONDS or elapsed_s > MAX_GAP_SECONDS:
-            return None  # timing artifact, out-of-order, or gap too large
+            return None
 
-        distance_m   = _haversine_m(prev_lat, prev_lon, lat, lon)
-        implied_kmh  = (distance_m / elapsed_s) * MS_TO_KMH
+        # GPS accuracy gate — poor fix can masquerade as a position jump
+        accuracy_m = _parse_accuracy_m(core)
+        if accuracy_m is not None and accuracy_m > MAX_GPS_ACCURACY_M:
+            return None
+
+        distance_m  = _haversine_m(prev_lat, prev_lon, lat, lon)
+        implied_kmh = (distance_m / elapsed_s) * MS_TO_KMH
 
         if distance_m < MIN_JUMP_METERS or implied_kmh <= MAX_JUMP_SPEED_KMH:
+            self._reset_streak(vehicle_id)
+            return None
+
+        if self._increment_streak(vehicle_id) < self.CONFIRM_N:
             return None
 
         return {

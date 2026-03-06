@@ -25,11 +25,14 @@ G_MS2           = 9.80665   # standard gravity, m/s²
 MS_TO_KMH       = 3.6       # m/s → km/h
 
 # Sentinel values meaning "field not available"
-SPEED_UNAVAILABLE   = 8191
-HEADING_UNAVAILABLE = 28800
-YAW_UNAVAILABLE     = 32767
-ACCEL_UNAVAILABLE   = 2001
-SECMARK_UNAVAILABLE = 65535  # J2735 DSSecond: valid range 0–59999 ms
+SPEED_UNAVAILABLE    = 8191
+HEADING_UNAVAILABLE  = 28800
+YAW_UNAVAILABLE      = 32767
+ACCEL_UNAVAILABLE    = 2001
+SECMARK_UNAVAILABLE  = 65535  # J2735 DSSecond: valid range 0–59999 ms
+ACCURACY_UNAVAILABLE = 255    # J2735 PositionalAccuracy semiMajor/semiMinor
+
+ACCURACY_UNIT_M = 0.05        # metres per LSB for semiMajor / semiMinor
 
 
 # ---------------------------------------------------------------------------
@@ -78,6 +81,24 @@ def _parse_time(ts: str) -> Optional[datetime]:
         return None
 
 
+def _parse_accuracy_m(core: dict) -> Optional[float]:
+    """Return the semiMajor positional accuracy in metres, or None if unavailable.
+
+    J2735 PositionalAccuracy.semiMajor: 0–254 LSB × 0.05 m/LSB; 255 = unavailable.
+    Only the semi-major axis is used; it represents the worst-case position error.
+    """
+    raw = core.get("accuracy", {}).get("semiMajor")
+    if raw is None:
+        return None
+    try:
+        val = int(raw)
+    except (ValueError, TypeError):
+        return None
+    if val == ACCURACY_UNAVAILABLE:
+        return None
+    return val * ACCURACY_UNIT_M
+
+
 def _parse_secmark(core: dict) -> Optional[int]:
     """Return coreData.secMark (0–59999 ms) or None if missing/unavailable."""
     raw = core.get("secMark")
@@ -111,7 +132,39 @@ class BaseDetector:
 
     Subclasses store whatever tuple they need in ``self._last[vehicle_id]``
     and call ``super().__init__()`` from their own ``__init__``.
+
+    Multi-message confirmation
+    --------------------------
+    Detectors use ``_increment_streak`` / ``_reset_streak`` to require
+    CONFIRM_N consecutive violations before emitting a misbehavior event.
+    This eliminates single-message GPS artefacts (tunnel exits, multipath).
+
+    Pattern in each detector's check():
+        if violation:
+            if self._increment_streak(vehicle_id) < self.CONFIRM_N:
+                return None          # not yet confirmed
+            return { ...event... }   # confirmed on Nth consecutive hit
+        else:
+            self._reset_streak(vehicle_id)
+            return None
+
+    Early returns (data quality guards, timing gaps) do NOT reset the streak
+    because they carry no information about whether the vehicle is behaving
+    correctly.
     """
 
+    CONFIRM_N = 2   # consecutive violations required before flagging
+
     def __init__(self):
-        self._last: dict = {}
+        self._last:   dict = {}
+        self._streak: dict = {}   # vehicle_id → consecutive violation count
+
+    def _increment_streak(self, vehicle_id: str) -> int:
+        """Increment and return the violation streak for vehicle_id."""
+        n = self._streak.get(vehicle_id, 0) + 1
+        self._streak[vehicle_id] = n
+        return n
+
+    def _reset_streak(self, vehicle_id: str) -> None:
+        """Reset the violation streak for vehicle_id on a clean observation."""
+        self._streak[vehicle_id] = 0

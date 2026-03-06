@@ -18,6 +18,8 @@ MAX_GAP_SECONDS     : 0.15 — gaps longer than this are skipped; the linear
                              integration assumption breaks down over long intervals
 MIN_DELTA_SPEED_KMH : 20.0 — require a meaningful speed change before flagging;
                              filters noise when the vehicle is nearly constant-speed
+CONFIRM_N           :  2   — consecutive violations required before flagging
+                             (inherited from BaseDetector)
 """
 
 from typing import Optional
@@ -87,6 +89,10 @@ class SpeedAccelConsistencyDetector(BaseDetector):
             return None
 
         if error_ms <= MAX_DELTA_ERROR_MS:
+            self._reset_streak(vehicle_id)
+            return None
+
+        if self._increment_streak(vehicle_id) < self.CONFIRM_N:
             return None
 
         return {

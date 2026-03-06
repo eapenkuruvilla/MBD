@@ -10,37 +10,50 @@ disagreement in either direction suggests a spoofed speed or position field.
 
 Thresholds
 ----------
-MAX_SPEED_DIFF_KMH : 500.0 — absolute difference above which a misbehavior is
-                             flagged; set above the p95 (14.6 km/h) of clean data
-MIN_SPEED_KMH      :  10.0 — both reported and implied speed must exceed this;
-                             near-standstill GPS noise dominates below this value
-MIN_GAP_SECONDS    :  0.05 — pairs closer than this are timing artifacts;
-                             microsecond Δt inflates implied speed astronomically
-MAX_GAP_SECONDS    :  0.15 — gaps longer than this are skipped; large Δt makes
-                             the haversine average unreliable
-MIN_DISTANCE_M     :   5.0 — minimum displacement to produce a meaningful
-                             implied-speed estimate
+MAX_SPEED_DIFF_KMH    : 500.0 — absolute difference above which a misbehavior is
+                                flagged; set above the p95 (14.6 km/h) of clean data
+MIN_SPEED_KMH         :  10.0 — both reported and implied speed must exceed this;
+                                near-standstill GPS noise dominates below this value
+MAX_HEADING_CHANGE_DEG:  30.0 — skip if the reported heading changed by more than
+                                this between messages; a turn makes the straight-line
+                                haversine underestimate actual travel distance,
+                                causing false implied-speed underestimates
+MAX_GPS_ACCURACY_M    :   5.0 — skip if positional accuracy (semiMajor) exceeds
+                                this; poor GPS fixes produce unreliable implied speeds
+MIN_GAP_SECONDS       :  0.05 — pairs closer than this are timing artifacts;
+                                microsecond Δt inflates implied speed astronomically
+MAX_GAP_SECONDS       :  0.15 — gaps longer than this are skipped; large Δt makes
+                                the haversine average unreliable
+MIN_DISTANCE_M        :   5.0 — minimum displacement to produce a meaningful
+                                implied-speed estimate
+CONFIRM_N             :   2   — consecutive violations required before flagging
+                                (inherited from BaseDetector)
 """
 
 from typing import Optional
 
 from .utils import (
-    _haversine_m, _parse_secmark, _secmark_elapsed_s, BaseDetector,
+    _haversine_m, _angular_diff, _parse_secmark, _secmark_elapsed_s,
+    _parse_accuracy_m, BaseDetector,
     LAT_SCALE, LON_SCALE, SPEED_UNIT_MS, SPEED_UNAVAILABLE, MS_TO_KMH,
+    HEADING_UNIT, HEADING_UNAVAILABLE,
 )
 
-MAX_SPEED_DIFF_KMH = 500.0
-MIN_SPEED_KMH      =  10.0
-MIN_GAP_SECONDS    =  0.05   # BSMs at 10 Hz → ~100 ms apart; reject sub-50 ms pairs
-MAX_GAP_SECONDS    =  0.15
-MIN_DISTANCE_M     =  5.0
+MAX_SPEED_DIFF_KMH     = 500.0
+MIN_SPEED_KMH          =  10.0
+MAX_HEADING_CHANGE_DEG =  30.0   # skip interval if vehicle was turning
+MAX_GPS_ACCURACY_M     =   5.0   # metres
+MIN_GAP_SECONDS        =  0.05
+MAX_GAP_SECONDS        =  0.15
+MIN_DISTANCE_M         =   5.0
 
 
 class SpeedPositionConsistencyDetector(BaseDetector):
-    """Stateful detector — tracks last known position/time per vehicle."""
+    """Stateful detector — tracks last known position/speed/heading/time per vehicle."""
 
     def __init__(self):
-        # vehicle_id -> (lat, lon, secmark, speed_ms)
+        # vehicle_id -> (lat, lon, secmark, speed_ms, heading_deg)
+        # heading_deg may be None if field was unavailable
         super().__init__()
 
     def check(self, bsm: dict) -> Optional[dict]:
@@ -68,13 +81,24 @@ class SpeedPositionConsistencyDetector(BaseDetector):
         speed_kmh = speed_ms * MS_TO_KMH
         secmark   = _parse_secmark(core)
 
+        # Parse heading optionally — used for turn detection only
+        hdg_raw = core.get("heading")
+        heading_deg: Optional[float] = None
+        if hdg_raw is not None:
+            try:
+                h = int(hdg_raw)
+                if h != HEADING_UNAVAILABLE:
+                    heading_deg = h * HEADING_UNIT
+            except (ValueError, TypeError):
+                pass
+
         prev = self._last.get(vehicle_id)
-        self._last[vehicle_id] = (lat, lon, secmark, speed_ms)
+        self._last[vehicle_id] = (lat, lon, secmark, speed_ms, heading_deg)
 
         if prev is None:
             return None
 
-        prev_lat, prev_lon, prev_secmark, prev_speed_ms = prev
+        prev_lat, prev_lon, prev_secmark, prev_speed_ms, prev_heading_deg = prev
 
         if secmark is None or prev_secmark is None:
             return None
@@ -94,12 +118,27 @@ class SpeedPositionConsistencyDetector(BaseDetector):
         if speed_kmh < MIN_SPEED_KMH or implied_kmh < MIN_SPEED_KMH:
             return None
 
+        # Heading correction — haversine underestimates distance during turns;
+        # skip the interval when a significant heading change is observed
+        if heading_deg is not None and prev_heading_deg is not None:
+            if _angular_diff(prev_heading_deg, heading_deg) > MAX_HEADING_CHANGE_DEG:
+                return None
+
+        # GPS accuracy gate
+        accuracy_m = _parse_accuracy_m(core)
+        if accuracy_m is not None and accuracy_m > MAX_GPS_ACCURACY_M:
+            return None
+
         diff_kmh = speed_kmh - implied_kmh   # positive = reported faster than GPS
 
         if abs(diff_kmh) <= MAX_SPEED_DIFF_KMH:
+            self._reset_streak(vehicle_id)
             return None
 
         direction = "reported_exceeds_implied" if diff_kmh > 0 else "implied_exceeds_reported"
+
+        if self._increment_streak(vehicle_id) < self.CONFIRM_N:
+            return None
 
         return {
             "misbehavior":        "speed_position_inconsistency",

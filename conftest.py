@@ -11,6 +11,7 @@ from detectors.utils import (
     HEADING_UNIT,
     ACCEL_UNIT_MS2,
     YAW_UNIT,
+    ACCURACY_UNIT_M,
 )
 
 
@@ -25,6 +26,7 @@ def make_bsm(
     yaw_deg_s: float = 0.0,
     wheel_brakes: str = "00000",
     record_generated_at: str = "2020-01-01 00:00:00.000",
+    accuracy_m: float = None,   # positional accuracy semiMajor in metres; None = omit field
 ) -> dict:
     """Return a BSM dict with all common coreData fields populated.
 
@@ -48,6 +50,8 @@ def make_bsm(
     }
     if secmark is not None:
         core["secMark"] = secmark
+    if accuracy_m is not None:
+        core["accuracy"] = {"semiMajor": round(accuracy_m / ACCURACY_UNIT_M)}
 
     return {
         "metadata": {

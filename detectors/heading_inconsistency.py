@@ -7,30 +7,37 @@ discrepancy suggests the heading field has been spoofed or corrupted.
 
 Thresholds
 ----------
-MAX_HEADING_DIFF_DEG : 90  — allowed angular difference between reported
-                             heading and GPS-derived bearing
-MIN_SPEED_KMH        : 10  — only check when the vehicle is actually moving;
-                             heading noise dominates at near-zero speed
-MIN_DISTANCE_M       :  5  — minimum displacement needed for a reliable
-                             bearing calculation
-MIN_GAP_SECONDS      : 0.05 — pairs closer than this are timing artifacts
-MAX_GAP_SECONDS      : 0.15 — gaps longer than this are skipped (vehicle may
-                             have made a legitimate turn during the gap)
+MAX_HEADING_DIFF_DEG : 90    — allowed angular difference between reported
+                               heading and GPS-derived bearing
+SPEED_GATE_KMH       : 20    — skip if EITHER the current or previous message
+                               speed is below this; heading noise dominates at
+                               low speed and legitimate turns are frequent
+MAX_GPS_ACCURACY_M   :  5    — skip if positional accuracy (semiMajor) exceeds
+                               this; poor GPS fixes produce unreliable bearings
+MIN_DISTANCE_M       :  5    — minimum displacement needed for a reliable
+                               bearing calculation
+MIN_GAP_SECONDS      : 0.05  — pairs closer than this are timing artifacts
+MAX_GAP_SECONDS      : 0.15  — gaps longer than this are skipped (vehicle may
+                               have made a legitimate turn during the gap)
+CONFIRM_N            :  2    — consecutive violations required before flagging
+                               (inherited from BaseDetector)
 """
 
 import math
 from typing import Optional
 
 from .utils import (
-    _haversine_m, _angular_diff, _parse_secmark, _secmark_elapsed_s, BaseDetector,
+    _haversine_m, _angular_diff, _parse_secmark, _secmark_elapsed_s,
+    _parse_accuracy_m, BaseDetector,
     LAT_SCALE, LON_SCALE, SPEED_UNIT_MS, MS_TO_KMH,
     HEADING_UNIT, HEADING_UNAVAILABLE,
 )
 
-MAX_HEADING_DIFF_DEG = 90.0   # degrees
-MIN_SPEED_KMH        = 10.0   # km/h
+MAX_HEADING_DIFF_DEG = 120.0   # degrees
+SPEED_GATE_KMH       = 20.0   # km/h — applied to both current and previous speed
+MAX_GPS_ACCURACY_M   =  5.0   # metres — skip if positional fix is too poor
 MIN_DISTANCE_M       =  5.0   # metres
-MIN_GAP_SECONDS      =  0.05  # seconds — pairs closer than this are timing artifacts
+MIN_GAP_SECONDS      =  0.05  # seconds
 MAX_GAP_SECONDS      =  0.15  # seconds
 
 
@@ -45,10 +52,10 @@ def _bearing_deg(lat1, lon1, lat2, lon2) -> float:
 
 
 class HeadingInconsistencyDetector(BaseDetector):
-    """Stateful detector — tracks last position per vehicle to derive bearing."""
+    """Stateful detector — tracks last position/speed per vehicle to derive bearing."""
 
     def __init__(self):
-        # vehicle_id -> (lat, lon, secmark)
+        # vehicle_id -> (lat, lon, secmark, speed_kmh)
         super().__init__()
 
     def check(self, bsm: dict) -> Optional[dict]:
@@ -79,15 +86,21 @@ class HeadingInconsistencyDetector(BaseDetector):
         secmark      = _parse_secmark(core)
 
         prev = self._last.get(vehicle_id)
-        self._last[vehicle_id] = (lat, lon, secmark)
+        self._last[vehicle_id] = (lat, lon, secmark, speed_kmh)
 
         if prev is None:
-            return None  # first message for this vehicle — nothing to compare
+            return None
 
-        if speed_kmh < MIN_SPEED_KMH:
-            return None  # heading noise dominates at near-zero speed
+        prev_lat, prev_lon, prev_secmark, prev_speed_kmh = prev
 
-        prev_lat, prev_lon, prev_secmark = prev
+        # Speed gate — skip if either end of the interval was slow (turning/parking)
+        if speed_kmh < SPEED_GATE_KMH or prev_speed_kmh < SPEED_GATE_KMH:
+            return None
+
+        # GPS accuracy gate — skip if positional fix is too poor for bearing calc
+        accuracy_m = _parse_accuracy_m(core)
+        if accuracy_m is not None and accuracy_m > MAX_GPS_ACCURACY_M:
+            return None
 
         if secmark is None or prev_secmark is None:
             return None
@@ -98,12 +111,16 @@ class HeadingInconsistencyDetector(BaseDetector):
 
         distance_m = _haversine_m(prev_lat, prev_lon, lat, lon)
         if distance_m < MIN_DISTANCE_M:
-            return None  # too little movement for a reliable GPS bearing
+            return None
 
         gps_bearing  = _bearing_deg(prev_lat, prev_lon, lat, lon)
         heading_diff = _angular_diff(reported_deg, gps_bearing)
 
         if heading_diff <= MAX_HEADING_DIFF_DEG:
+            self._reset_streak(vehicle_id)
+            return None
+
+        if self._increment_streak(vehicle_id) < self.CONFIRM_N:
             return None
 
         return {

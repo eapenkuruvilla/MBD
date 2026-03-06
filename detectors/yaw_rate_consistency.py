@@ -19,23 +19,29 @@ Thresholds
 ----------
 MAX_YAW_DIFF_DEG_S : 90.0  — |reported_yaw − gps_heading_rate| above this is
                              flagged; set above the p99 (19.0 °/s) of clean pairs
-MIN_SPEED_KMH      : 10.0  — only check when actually moving; yaw is noisy
-                             at near-zero speed
+SPEED_GATE_KMH     : 20.0  — skip if EITHER the current or previous message
+                             speed is below this; yaw is noisy at low speed
+MAX_GPS_ACCURACY_M :  5.0  — skip if positional accuracy (semiMajor) exceeds
+                             this; poor GPS inflates the derived heading rate
 MIN_GAP_SECONDS    : 0.05  — pairs closer than this are timing artifacts
 MAX_GAP_SECONDS    : 0.15  — gaps longer than this are skipped
 MIN_DISTANCE_M     :  5.0  — minimum displacement for a reliable heading rate
+CONFIRM_N          :  2    — consecutive violations required before flagging
+                             (inherited from BaseDetector)
 """
 
 from typing import Optional
 
 from .utils import (
-    _haversine_m, _parse_secmark, _secmark_elapsed_s, BaseDetector,
+    _haversine_m, _parse_secmark, _secmark_elapsed_s, _parse_accuracy_m,
+    BaseDetector,
     LAT_SCALE, LON_SCALE, HEADING_UNIT, HEADING_UNAVAILABLE,
     SPEED_UNIT_MS, SPEED_UNAVAILABLE, YAW_UNIT, YAW_UNAVAILABLE, MS_TO_KMH,
 )
 
 MAX_YAW_DIFF_DEG_S = 90.0
-MIN_SPEED_KMH      = 10.0
+SPEED_GATE_KMH     = 20.0   # km/h — applied to both current and previous speed
+MAX_GPS_ACCURACY_M =  5.0   # metres
 MIN_GAP_SECONDS    =  0.05
 MAX_GAP_SECONDS    =  0.15
 MIN_DISTANCE_M     =  5.0
@@ -53,10 +59,10 @@ def _signed_heading_delta(h_prev: float, h_curr: float) -> float:
 
 
 class YawRateConsistencyDetector(BaseDetector):
-    """Stateful detector — tracks last heading/position/time per vehicle."""
+    """Stateful detector — tracks last heading/position/speed/time per vehicle."""
 
     def __init__(self):
-        # vehicle_id -> (heading_deg, lat, lon, secmark)
+        # vehicle_id -> (heading_deg, lat, lon, secmark, speed_kmh)
         super().__init__()
 
     def check(self, bsm: dict) -> Optional[dict]:
@@ -90,15 +96,21 @@ class YawRateConsistencyDetector(BaseDetector):
         secmark        = _parse_secmark(core)
 
         prev = self._last.get(vehicle_id)
-        self._last[vehicle_id] = (heading_deg, lat, lon, secmark)
+        self._last[vehicle_id] = (heading_deg, lat, lon, secmark, speed_kmh)
 
         if prev is None:
             return None
 
-        if speed_kmh < MIN_SPEED_KMH:
+        prev_heading, prev_lat, prev_lon, prev_secmark, prev_speed_kmh = prev
+
+        # Speed gate — skip if either end of the interval was slow
+        if speed_kmh < SPEED_GATE_KMH or prev_speed_kmh < SPEED_GATE_KMH:
             return None
 
-        prev_heading, prev_lat, prev_lon, prev_secmark = prev
+        # GPS accuracy gate
+        accuracy_m = _parse_accuracy_m(core)
+        if accuracy_m is not None and accuracy_m > MAX_GPS_ACCURACY_M:
+            return None
 
         if secmark is None or prev_secmark is None:
             return None
@@ -111,12 +123,16 @@ class YawRateConsistencyDetector(BaseDetector):
         if distance_m < MIN_DISTANCE_M:
             return None
 
-        signed_delta        = _signed_heading_delta(prev_heading, heading_deg)
-        gps_yaw_rate_deg_s  = signed_delta / elapsed_s   # signed °/s from GPS
+        signed_delta       = _signed_heading_delta(prev_heading, heading_deg)
+        gps_yaw_rate_deg_s = signed_delta / elapsed_s   # signed °/s from GPS
 
         yaw_diff = abs(yaw_rate_deg_s - gps_yaw_rate_deg_s)
 
         if yaw_diff <= MAX_YAW_DIFF_DEG_S:
+            self._reset_streak(vehicle_id)
+            return None
+
+        if self._increment_streak(vehicle_id) < self.CONFIRM_N:
             return None
 
         return {

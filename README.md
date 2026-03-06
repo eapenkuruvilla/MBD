@@ -303,15 +303,22 @@ elapsed-time calculations.
 minute, 0–59999.  Value 65535 = unavailable.  The helper
 `_secmark_elapsed_s(prev, curr)` handles minute wraparound via modulo 60 000.
 
-All stateful detectors apply a **timing window** filter:
+All stateful detectors apply a **timing window** filter and a
+**multi-message confirmation** requirement:
 
 | Guard | Value | Purpose |
 |---|---|---|
 | `MIN_GAP_SECONDS` | 0.05 s | Reject near-simultaneous pairs (timing artifacts) |
 | `MAX_GAP_SECONDS` | 0.15 s | Reject large gaps; vehicle may have turned or moved |
+| `CONFIRM_N` | 2 | Consecutive violations required before flagging; single-message GPS artefacts (tunnel exits, multipath) are suppressed |
 
 BSMs are transmitted at ~10 Hz (≈ 100 ms apart), so valid consecutive pairs
 land squarely in the 50–150 ms window.
+
+Early returns caused by data-quality guards (timing gap out of range, missing
+secMark, poor GPS fix) do **not** reset the confirmation streak — they carry no
+information about whether the vehicle is behaving correctly.  Only a
+confirmed-clean observation resets it.
 
 ---
 
@@ -319,6 +326,8 @@ land squarely in the 50–150 ms window.
 
 **Fields:** `lat`, `long`, `secMark`
 **Threshold:** implied speed > 10 km/h AND displacement > 100 m in one interval
+**GPS accuracy gate:** skip if `accuracy.semiMajor` > 5 m (poor fix mimics a jump)
+**Confirmation:** 2 consecutive violations required
 
 Calculates the Haversine distance between consecutive positions of the same
 vehicle.  A jump larger than 100 m in ≤ 150 ms implies a speed impossible
@@ -334,8 +343,10 @@ outlier.
 
 **Fields:** `heading`, `lat`, `long`, `speed`, `secMark`
 **Threshold:** |reported heading − GPS-derived bearing| > 90°
-**Minimum speed:** 10 km/h
+**Speed gate:** skip if either the current or the previous message speed < 20 km/h
 **Minimum displacement:** 5 m
+**GPS accuracy gate:** skip if `accuracy.semiMajor` > 5 m
+**Confirmation:** 2 consecutive violations required
 
 Derives the true bearing of motion from GPS displacement and compares it
 against the reported heading.  A discrepancy larger than 90° means the
@@ -349,10 +360,13 @@ actual movement — a strong sign of heading field spoofing.
 
 #### 6. Speed–Position Consistency (`speed_position_inconsistency`)
 
-**Fields:** `speed`, `lat`, `long`, `secMark`
+**Fields:** `speed`, `heading`, `lat`, `long`, `secMark`
 **Threshold:** |reported speed − implied speed| > 500 km/h
-**Minimum speed (either):** 10 km/h
+**Noise floor:** skip if either reported or implied speed < 10 km/h
+**Heading correction:** skip if the reported heading changed > 30° between messages (haversine underestimates travel distance mid-turn)
 **Minimum displacement:** 5 m
+**GPS accuracy gate:** skip if `accuracy.semiMajor` > 5 m
+**Confirmation:** 2 consecutive violations required
 
 Computes implied speed from GPS displacement ÷ elapsed time and compares it
 against the reported speed field.  A large discrepancy in either direction is
@@ -362,7 +376,7 @@ suspicious:
 - **`implied_exceeds_reported`** — position jumps faster than speed claims
 
 **Output fields:** `direction`, `reported_speed_kmh`, `implied_speed_kmh`,
-`diff_kmh`, `threshold_kmh`, `distance_m`, `elapsed_s`
+`diff_kmh`, `diff_abs_kmh`, `threshold_kmh`, `distance_m`, `elapsed_s`
 
 ---
 
@@ -371,6 +385,7 @@ suspicious:
 **Fields:** `speed`, `accelSet.long`, `secMark`
 **Threshold:** |observed Δspeed − expected Δspeed| > 5 m/s
 **Minimum Δspeed:** 20 km/h (filters near-constant-speed segments)
+**Confirmation:** 2 consecutive violations required
 
 Newton's second law says speed change ≈ acceleration × time.  The detector
 computes `expected_Δspeed = prev_accel × elapsed_s` and compares it against
@@ -387,8 +402,10 @@ or severely corrupted.
 
 **Fields:** `heading`, `lat`, `long`, `speed`, `secMark`
 **Threshold:** heading change rate > 90 °/s
-**Minimum speed:** 10 km/h
+**Speed gate:** skip if either the current or the previous message speed < 20 km/h
 **Minimum displacement:** 5 m
+**GPS accuracy gate:** skip if `accuracy.semiMajor` > 5 m
+**Confirmation:** 2 consecutive violations required
 
 Divides the angular heading change by elapsed time to get a turning rate in
 °/s.  Tyre-friction physics limit how fast a road vehicle can yaw; the
@@ -404,8 +421,10 @@ indicate a spoofed heading sequence.
 
 **Fields:** `heading`, `accelSet.yaw`, `lat`, `long`, `speed`, `secMark`
 **Threshold:** |reported yaw rate − GPS-derived yaw rate| > 90 °/s
-**Minimum speed:** 10 km/h
+**Speed gate:** skip if either the current or the previous message speed < 20 km/h
 **Minimum displacement:** 5 m
+**GPS accuracy gate:** skip if `accuracy.semiMajor` > 5 m
+**Confirmation:** 2 consecutive violations required
 
 Compares the gyroscope yaw rate (`accelSet.yaw`, signed °/s) against the
 heading change rate derived from consecutive GPS positions.  The two values
@@ -802,6 +821,7 @@ bsm = make_bsm(
     accel_long_ms2=0.0,
     yaw_deg_s=0.0,
     wheel_brakes="00000",
+    accuracy_m=2.0,       # GPS semiMajor in metres; None = field omitted
 )
 ```
 
