@@ -33,7 +33,7 @@ from .utils import (
     HEADING_UNIT, HEADING_UNAVAILABLE,
 )
 
-MAX_HEADING_DIFF_DEG = 120.0   # degrees
+MAX_HEADING_DIFF_DEG = 90.0   # degrees
 SPEED_GATE_KMH       = 20.0   # km/h — applied to both current and previous speed
 MAX_GPS_ACCURACY_M   =  5.0   # metres — skip if positional fix is too poor
 MIN_DISTANCE_M       =  5.0   # metres

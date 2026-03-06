@@ -178,13 +178,13 @@ This single command:
 ### Deleting all historical indices
 
 The easiest way to wipe all MBD data across all dates is to bring the stack
-down with the `-v` flag, which removes Docker volumes (Elasticsearch data and
-Kibana state), then restart:
+down with the `-v` flag (removes Docker volumes: Elasticsearch data and Kibana
+state), clear and regenerate the detection log, then restart:
 
 ```bash
 docker compose down -v
 rm logs/*
-make DATA=data/tampa_BSM_2021.zip
+make run DATA=data/tampa_BSM_2021.zip
 docker compose up -d
 
 # Wait for the stack to be healthy, then restore data
