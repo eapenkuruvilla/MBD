@@ -19,9 +19,10 @@ anomalous behaviour, and visualises findings in Kibana.
 9. [Kibana Dashboards](#kibana-dashboards)
 10. [Network Access & Security](#network-access--security)
 11. [Troubleshooting](#troubleshooting)
-12. [Development: Unit Tests](#development-unit-tests)
-13. [Future Work](#future-work)
-14. [Project Structure](#project-structure)
+12. [Vehicle Replay Tool](#vehicle-replay-tool)
+13. [Development: Unit Tests](#development-unit-tests)
+14. [Future Work](#future-work)
+15. [Project Structure](#project-structure)
 
 ---
 
@@ -60,6 +61,7 @@ Elasticsearch          ← Index: mbd-misbehaviors-YYYY.MM.dd
 | `manage_display_filter.py` | Pushes L2 filter from `thresholds.json` into ES as an alias |
 | `thresholds.json` | Editable per-type L2 display thresholds |
 | `Makefile` | Single entry point for all common operations |
+| `replay.py` | Troubleshooting tool — animates a single vehicle's BSM movement on a map |
 
 All ELK services run in Docker (`docker-compose.yml`).  `detector.py` runs
 locally (outside Docker) and writes to `logs/`, which is volume-mounted into
@@ -781,6 +783,84 @@ docker system df -v | grep mbd
 
 ---
 
+## Vehicle Replay Tool
+
+`replay.py` is a troubleshooting tool that animates a single vehicle's
+movement from the raw BSM data file.  Use it to visually inspect the position,
+heading, and speed of a flagged vehicle around the time of a misbehavior event.
+
+### Prerequisites
+
+```bash
+pip install matplotlib
+```
+
+### Arguments
+
+| Argument | Default | Description |
+|---|---|---|
+| `--vehicle-id` | *(required)* | Vehicle ID (`coreData.id`) |
+| `--time-at` | *(required)* | Centre time `HH:MM:SS[.mmm]` — paste the Kibana `@timestamp` directly |
+| `--start-offset` | `10` | Seconds before `--time-at` to include |
+| `--end-offset` | `5` | Seconds after `--time-at` to include |
+| `--speed` | `1.0` | Playback speed multiplier (`0.1` = 10× slower than real time) |
+| `--file` | *(required)* | BSM ZIP archive or plain NDJSON file |
+| `--log` | `logs/misbehaviors.log` | Used as a fallback if `--time-at` matches no BSMs directly |
+
+### Usage
+
+```bash
+python replay.py \
+  --vehicle-id 8273834 \
+  --time-at 18:17:50.380 \
+  --start-offset 10 \
+  --end-offset 5 \
+  --speed 0.1 \
+  --file data/tampa_BSM_2021.zip
+```
+
+The time to pass is the Kibana `@timestamp` for the event of interest.
+`@timestamp` is mapped from `record_generated_at` (the BSM source time in ET),
+so it reflects when the vehicle broadcast the message — not when the detector
+ran.
+
+### Display
+
+| Element | Description |
+|---|---|
+| Grey line | Full trajectory of the vehicle across the time window |
+| Red star | Vehicle position at `--time-at` |
+| Blue arrow | Heading direction (0 = North, clockwise per SAE J2735) |
+| Arrow label | Speed in km/h |
+| Blue trail | Last 8 positions |
+| Top-left | Current BSM timestamp (`HH:MM:SS.mmm`) |
+| Top-right | Offset from `--time-at` (e.g. `Δ −3.200s`) |
+
+### Kibana → replay workflow
+
+1. In the Kibana event table, click a misbehavior event for the vehicle.
+2. Copy the `@timestamp` value (e.g. `18:17:50.380`).
+3. Copy the `vehicle_id` field.
+4. Pass both to `replay.py` as `--time-at` and `--vehicle-id`.
+
+If `--time-at` does not match any BSM by `record_generated_at`, the tool
+automatically falls back to searching `misbehaviors.log` by `record_generated_at`
+and prints the resolved time before opening the animation.
+
+### ZIP search performance
+
+The Tampa BSM ZIP encodes date and hour in each entry path
+(`tampa/BSM/YYYY/MM/DD/HH/…`).  `replay.py` reads this path to pre-filter
+entries before opening any files, reducing the number of entries scanned from
+~37 000 to the handful that cover the target hour.  The terminal shows how
+many entries were scanned:
+
+```
+Scanning 8 ZIP entries (hour filter: {18})
+```
+
+---
+
 ## Development: Unit Tests
 
 Tests live in `tests/` and use `pytest`.  They run **outside Docker** on
@@ -1101,6 +1181,7 @@ is reachable would surface misconfiguration before a long detector run.
 ```
 MBD/
 ├── detector.py                  Main entry point — reads BSMs, runs detectors
+├── replay.py                    Troubleshooting tool — animates a vehicle's BSM movement on a map
 ├── manage_display_filter.py     Pushes L2 thresholds to ES; creates mbd-display data view
 ├── thresholds.json              L2 display thresholds (editable)
 ├── Makefile                     Single entry point for all common operations
