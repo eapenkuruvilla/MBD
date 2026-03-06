@@ -128,7 +128,9 @@ make filter
 2. Each BSM is passed through all 9 detectors.  When a detector fires, a
    JSON event is written to `logs/misbehaviors.log`.
 3. A cooldown mechanism suppresses duplicate events for the same vehicle
-   and misbehavior type within 50 m / 30 s.
+   and misbehavior type: suppressed if within 50 m **or** within 30 s of
+   the last logged event (OR, not AND — a vehicle at highway speed exits
+   50 m in under a second, so AND would never suppress moving vehicles).
 4. Restarting Logstash (`make ingest`) causes Filebeat to re-read the log
    from the beginning and ship all lines to Elasticsearch.
 5. Logstash creates or appends to today's date-stamped index
@@ -181,6 +183,8 @@ Kibana state), then restart:
 
 ```bash
 docker compose down -v
+rm logs/*
+make DATA=data/tampa_BSM_2021.zip
 docker compose up -d
 
 # Wait for the stack to be healthy, then restore data
@@ -362,7 +366,7 @@ actual movement — a strong sign of heading field spoofing.
 
 **Fields:** `speed`, `heading`, `lat`, `long`, `secMark`
 **Threshold:** |reported speed − implied speed| > 500 km/h
-**Noise floor:** skip if either reported or implied speed < 10 km/h
+**Speed gate:** skip if either reported or implied speed < 10 km/h (lower than heading/yaw detectors because magnitude is less sensitive to GPS noise than direction)
 **Heading correction:** skip if the reported heading changed > 30° between messages (haversine underestimates travel distance mid-turn)
 **Minimum displacement:** 5 m
 **GPS accuracy gate:** skip if `accuracy.semiMajor` > 5 m

@@ -53,7 +53,9 @@ DETECTORS = [
 LAT_SCALE = 1e-7   # BSM lat/long are integers × 1e-7 degrees
 LON_SCALE = 1e-7
 
-# Suppress duplicate map dots: same vehicle+type within this distance AND time.
+# Suppress duplicate events: same vehicle+type within this distance OR time.
+# OR is intentional: a fast-moving vehicle exits COOLDOWN_METERS in < 1 s at
+# highway speed, so AND would never suppress speed/accel events in motion.
 COOLDOWN_METERS = 50.0
 COOLDOWN_SECONDS = 30.0
 
@@ -279,7 +281,7 @@ def _process_lines(lines, log_f, cooldown: dict, counts: dict,
                     )
                 else:
                     close_time = False
-                if close_space and close_time:
+                if close_space or close_time:
                     suppressed += 1
                     continue
 

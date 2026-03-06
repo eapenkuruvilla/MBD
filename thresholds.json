@@ -35,7 +35,7 @@
     },
 
     "position_jump": {
-      "jump_m": { "gte": 800 }
+      "jump_m": { "gte": 500 }
     },
 
     "heading_inconsistency": {
@@ -43,7 +43,7 @@
     },
 
     "implausible_heading_change_rate": {
-      "heading_rate_deg_s": { "gte": 2000 }
+      "heading_rate_deg_s": { "gte": 1000 }
     },
 
     "speed_position_inconsistency": {
@@ -55,7 +55,7 @@
     },
 
     "yaw_rate_inconsistency": {
-      "yaw_diff_deg_s": { "gte": 2000 }
+      "yaw_diff_deg_s": { "gte": 1000 }
     },
 
     "brakes_on_no_decel": {

@@ -12,8 +12,10 @@ Thresholds
 ----------
 MAX_SPEED_DIFF_KMH    : 500.0 — absolute difference above which a misbehavior is
                                 flagged; set above the p95 (14.6 km/h) of clean data
-MIN_SPEED_KMH         :  10.0 — both reported and implied speed must exceed this;
-                                near-standstill GPS noise dominates below this value
+SPEED_GATE_KMH        :  10.0 — both reported and implied speed must exceed this;
+                                near-standstill GPS noise dominates below this value;
+                                10 km/h (not 20) because magnitude is far less sensitive
+                                to GPS noise than direction (heading/yaw detectors)
 MAX_HEADING_CHANGE_DEG:  30.0 — skip if the reported heading changed by more than
                                 this between messages; a turn makes the straight-line
                                 haversine underestimate actual travel distance,
@@ -40,7 +42,7 @@ from .utils import (
 )
 
 MAX_SPEED_DIFF_KMH     = 500.0
-MIN_SPEED_KMH          =  10.0
+SPEED_GATE_KMH         =  10.0
 MAX_HEADING_CHANGE_DEG =  30.0   # skip interval if vehicle was turning
 MAX_GPS_ACCURACY_M     =   5.0   # metres
 MIN_GAP_SECONDS        =  0.05
@@ -115,7 +117,7 @@ class SpeedPositionConsistencyDetector(BaseDetector):
         implied_kmh = implied_ms * MS_TO_KMH
 
         # Skip if either speed is below the noise floor
-        if speed_kmh < MIN_SPEED_KMH or implied_kmh < MIN_SPEED_KMH:
+        if speed_kmh < SPEED_GATE_KMH or implied_kmh < SPEED_GATE_KMH:
             return None
 
         # Heading correction — haversine underestimates distance during turns;
