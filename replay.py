@@ -45,6 +45,7 @@ import zipfile
 from datetime import datetime
 from pathlib import Path
 
+import contextily as ctx
 import matplotlib.animation as animation
 import matplotlib.pyplot as plt
 
@@ -330,7 +331,6 @@ def run_animation(frames: list, vehicle_id: str, speed: float,
 
     fig, ax = plt.subplots(figsize=(10, 8))
     fig.subplots_adjust(bottom=0.20)
-    ax.set_facecolor("#e8e8e8")
     ax.set_aspect("equal")
 
     margin = max(0.0003, extent * 0.12)
@@ -338,9 +338,13 @@ def run_animation(frames: list, vehicle_id: str, speed: float,
     ax.set_ylim(min(lats) - margin, max(lats) + margin)
     ax.set_xlabel("Longitude")
     ax.set_ylabel("Latitude")
-    ax.grid(True, alpha=0.35, color="white")
+    ax.grid(True, alpha=0.25, color="white")
 
-    ax.plot(lons, lats, color="#bbbbbb", linewidth=1, zorder=1,
+    print("Fetching map tiles …")
+    ctx.add_basemap(ax, crs="EPSG:4326",
+                    source=ctx.providers.OpenStreetMap.Mapnik, zoom="auto")
+
+    ax.plot(lons, lats, color="#333333", linewidth=1.5, zorder=1,
             label="Trajectory")
 
     ref_idx = min(range(len(frames)), key=lambda i: abs(frames[i]["dt"]))
