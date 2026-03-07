@@ -8,7 +8,7 @@ Centralises:
 """
 
 import math
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Tuple
 
 # ---------------------------------------------------------------------------
@@ -33,6 +33,15 @@ SECMARK_UNAVAILABLE  = 65535  # J2735 DSSecond: valid range 0–59999 ms
 ACCURACY_UNAVAILABLE = 255    # J2735 PositionalAccuracy semiMajor/semiMinor
 
 ACCURACY_UNIT_M = 0.05        # metres per LSB for semiMajor / semiMinor
+
+
+# ---------------------------------------------------------------------------
+# BSM field access
+# ---------------------------------------------------------------------------
+
+def get_core(bsm: dict) -> dict:
+    """Return the coreData dict from a BSM, or {} if absent."""
+    return bsm.get("payload", {}).get("data", {}).get("coreData", {})
 
 
 # ---------------------------------------------------------------------------
@@ -61,7 +70,13 @@ def _angular_diff(a: float, b: float) -> float:
 # ---------------------------------------------------------------------------
 
 def _parse_time(ts: str) -> Optional[datetime]:
-    """Parse a BSM timestamp string; return datetime or None on failure."""
+    """Parse a BSM timestamp string; return datetime or None on failure.
+
+    Handles formats seen in USDOT CV Pilot data, e.g.:
+      '2020-05-06 07:06:03.419 [ET]'
+      '2020-05-06T07:06:03.419Z'
+      epoch-milliseconds as a string
+    """
     if not ts:
         return None
     clean = ts.split("[")[0].strip()
@@ -78,6 +93,10 @@ def _parse_time(ts: str) -> Optional[datetime]:
     try:
         return datetime.fromisoformat(clean.replace("Z", "+00:00"))
     except ValueError:
+        pass
+    try:
+        return datetime.fromtimestamp(int(ts) / 1000, tz=timezone.utc)
+    except (ValueError, OSError):
         return None
 
 

@@ -23,7 +23,7 @@ from typing import Optional
 
 from .utils import (
     _haversine_m, _parse_secmark, _secmark_elapsed_s, _parse_accuracy_m,
-    BaseDetector, LAT_SCALE, LON_SCALE, MS_TO_KMH,
+    BaseDetector, LAT_SCALE, LON_SCALE, MS_TO_KMH, get_core,
 )
 
 MAX_JUMP_SPEED_KMH = 10.0   # km/h — implied speed must exceed this
@@ -41,7 +41,7 @@ class PositionJumpDetector(BaseDetector):
         super().__init__()
 
     def check(self, bsm: dict) -> Optional[dict]:
-        core = bsm.get("payload", {}).get("data", {}).get("coreData", {})
+        core = get_core(bsm)
 
         vehicle_id = core.get("id")
         lat_raw    = core.get("lat")

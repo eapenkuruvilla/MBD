@@ -17,7 +17,6 @@ import argparse
 import hashlib
 import io
 import json
-import math
 import sys
 import time
 import zipfile
@@ -25,23 +24,23 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
-from detectors import accel as accel_detector
-from detectors import brakes_inconsistency as brakes_detector
-from detectors import speed as speed_detector
+from detectors.accel import AccelDetector
+from detectors.brakes_inconsistency import BrakesInconsistencyDetector
 from detectors.heading_change_rate import HeadingChangeRateDetector
 from detectors.heading_inconsistency import HeadingInconsistencyDetector
 from detectors.position_jump import PositionJumpDetector
+from detectors.speed import SpeedDetector
 from detectors.speed_accel_consistency import SpeedAccelConsistencyDetector
 from detectors.speed_position_consistency import SpeedPositionConsistencyDetector
 from detectors.yaw_rate_consistency import YawRateConsistencyDetector
+from detectors.utils import LAT_SCALE, LON_SCALE, _haversine_m, _parse_time, get_core
 
-# Register detectors here as more are added.
-# Module-level detectors (stateless) and class instances (stateful) both work
-# because detector.check(bsm) resolves to the module function or instance method.
+# Register detectors here as more are added.  All entries are class instances
+# with a check(bsm) -> Optional[dict] method.
 DETECTORS = [
-    speed_detector,
-    accel_detector,
-    brakes_detector,
+    SpeedDetector(),
+    AccelDetector(),
+    BrakesInconsistencyDetector(),
     PositionJumpDetector(),
     HeadingInconsistencyDetector(),
     SpeedPositionConsistencyDetector(),
@@ -49,9 +48,6 @@ DETECTORS = [
     HeadingChangeRateDetector(),
     YawRateConsistencyDetector(),
 ]
-
-LAT_SCALE = 1e-7   # BSM lat/long are integers × 1e-7 degrees
-LON_SCALE = 1e-7
 
 # Suppress duplicate events: same vehicle+type within this distance OR time.
 # OR is intentional: a fast-moving vehicle exits COOLDOWN_METERS in < 1 s at
@@ -139,46 +135,6 @@ def _progress(msg: str, counts=None) -> None:
         _progress_line_count = 1
 
 
-def _haversine_m(lat1, lon1, lat2, lon2):
-    R = 6_371_000
-    phi1, phi2 = math.radians(lat1), math.radians(lat2)
-    dphi = math.radians(lat2 - lat1)
-    dlam = math.radians(lon2 - lon1)
-    a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlam / 2) ** 2
-    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-
-
-def _parse_bsm_time(ts: str):
-    """Parse recordGeneratedAt to a datetime; return None on failure.
-
-    Handles formats seen in USDOT CV Pilot data, e.g.:
-      '2020-05-06 07:06:03.419 [ET]'
-      '2020-05-06T07:06:03.419Z'
-      epoch-milliseconds as a string
-    """
-    if not ts:
-        return None
-    clean = ts.split("[")[0].strip()
-    for fmt in (
-        "%Y-%m-%d %H:%M:%S.%f",
-        "%Y-%m-%d %H:%M:%S",
-        "%Y-%m-%dT%H:%M:%S.%f",
-        "%Y-%m-%dT%H:%M:%S",
-    ):
-        try:
-            return datetime.strptime(clean, fmt)
-        except ValueError:
-            pass
-    try:
-        return datetime.fromisoformat(clean.replace("Z", "+00:00"))
-    except ValueError:
-        pass
-    try:
-        return datetime.fromtimestamp(int(ts) / 1000, tz=timezone.utc)
-    except (ValueError, OSError):
-        return None
-
-
 def parse_args():
     parser = argparse.ArgumentParser(description="V2X BSM Misbehavior Detector")
     parser.add_argument(
@@ -201,7 +157,7 @@ def parse_args():
 def extract_context(bsm: dict) -> dict:
     """Pull common fields used by all log entries."""
     meta = bsm.get("metadata", {})
-    core = bsm.get("payload", {}).get("data", {}).get("coreData", {})
+    core = get_core(bsm)
 
     lat_raw = core.get("lat")
     lon_raw = core.get("long")
@@ -269,7 +225,7 @@ def _process_lines(lines, log_f, cooldown: dict, counts: dict,
 
             key = (context["vehicle_id"], result["misbehavior"])
             lat, lon = context.get("lat"), context.get("lon")
-            bsm_time = _parse_bsm_time(context.get("record_generated_at", ""))
+            bsm_time = _parse_time(context.get("record_generated_at", ""))
             prev = cooldown.get(key)
 
             if prev is not None and lat is not None and lon is not None:

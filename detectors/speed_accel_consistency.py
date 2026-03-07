@@ -25,7 +25,7 @@ CONFIRM_N           :  2   — consecutive violations required before flagging
 from typing import Optional
 
 from .utils import (
-    _parse_secmark, _secmark_elapsed_s, BaseDetector,
+    _parse_secmark, _secmark_elapsed_s, BaseDetector, get_core,
     SPEED_UNIT_MS, SPEED_UNAVAILABLE, ACCEL_UNIT_MS2, ACCEL_UNAVAILABLE, MS_TO_KMH,
 )
 
@@ -44,7 +44,7 @@ class SpeedAccelConsistencyDetector(BaseDetector):
         super().__init__()
 
     def check(self, bsm: dict) -> Optional[dict]:
-        core = bsm.get("payload", {}).get("data", {}).get("coreData", {})
+        core = get_core(bsm)
 
         vehicle_id = core.get("id")
         spd_raw    = core.get("speed")

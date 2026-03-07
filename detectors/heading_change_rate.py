@@ -27,7 +27,7 @@ from typing import Optional
 
 from .utils import (
     _haversine_m, _angular_diff, _parse_secmark, _secmark_elapsed_s,
-    _parse_accuracy_m, BaseDetector,
+    _parse_accuracy_m, BaseDetector, get_core,
     LAT_SCALE, LON_SCALE, HEADING_UNIT, HEADING_UNAVAILABLE,
     SPEED_UNIT_MS, SPEED_UNAVAILABLE, MS_TO_KMH,
 )
@@ -48,7 +48,7 @@ class HeadingChangeRateDetector(BaseDetector):
         super().__init__()
 
     def check(self, bsm: dict) -> Optional[dict]:
-        core = bsm.get("payload", {}).get("data", {}).get("coreData", {})
+        core = get_core(bsm)
 
         vehicle_id = core.get("id")
         hdg_raw    = core.get("heading")

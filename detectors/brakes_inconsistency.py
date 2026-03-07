@@ -40,7 +40,7 @@ DECEL_NO_BRAKES_THRESHOLD:  1.0 g (9.81 m/s²)  — magnitude of deceleration
 
 from typing import Optional
 
-from .utils import ACCEL_UNAVAILABLE, ACCEL_UNIT_MS2, G_MS2
+from .utils import ACCEL_UNAVAILABLE, ACCEL_UNIT_MS2, G_MS2, get_core
 
 ACCEL_BRAKING_THRESHOLD_G   = 1.0  # g  — positive accel while brakes on
 DECEL_NO_BRAKES_THRESHOLD_G = 1.0  # g  — magnitude, decel without brakes
@@ -76,37 +76,47 @@ def _parse_wheel_brakes(wb) -> Optional[bool]:
     return any(c == '1' for c in wb[1:])
 
 
-def check(bsm: dict) -> Optional[dict]:
-    """
-    Returns a misbehavior record if brake state and longitudinal acceleration
-    are inconsistent, else None.
-    """
-    core = bsm.get("payload", {}).get("data", {}).get("coreData", {})
+class BrakesInconsistencyDetector:
+    """Stateless detector — flags inconsistencies between brake state and acceleration."""
 
-    accel_ms2    = _parse_accel(core.get("accelSet", {}).get("long"))
-    any_braking  = _parse_wheel_brakes(core.get("brakes", {}).get("wheelBrakes"))
+    def check(self, bsm: dict) -> Optional[dict]:
+        """Returns a misbehavior record if brake state and longitudinal acceleration
+        are inconsistent, else None."""
+        core = get_core(bsm)
 
-    if accel_ms2 is None or any_braking is None:
+        wheel_brakes_raw = core.get("brakes", {}).get("wheelBrakes")
+        accel_ms2    = _parse_accel(core.get("accelSet", {}).get("long"))
+        any_braking  = _parse_wheel_brakes(wheel_brakes_raw)
+
+        if accel_ms2 is None or any_braking is None:
+            return None
+
+        # Case 1 — brakes applied but vehicle is accelerating
+        if any_braking and accel_ms2 > ACCEL_BRAKING_THRESHOLD_MS2:
+            return {
+                "misbehavior":  "brakes_on_no_decel",
+                "accel_ms2":    round(accel_ms2, 4),
+                "accel_g":      round(accel_ms2 / G_MS2, 4),
+                "threshold_ms2": ACCEL_BRAKING_THRESHOLD_MS2,
+                "wheel_brakes": wheel_brakes_raw,
+            }
+
+        # Case 2 — heavy deceleration with no wheel brakes active
+        if not any_braking and accel_ms2 < -DECEL_NO_BRAKES_THRESHOLD_MS2:
+            return {
+                "misbehavior":  "decel_no_brakes",
+                "accel_ms2":    round(accel_ms2, 4),
+                "accel_g":      round(accel_ms2 / G_MS2, 4),
+                "threshold_ms2": -DECEL_NO_BRAKES_THRESHOLD_MS2,
+                "wheel_brakes": wheel_brakes_raw,
+            }
+
         return None
 
-    # Case 1 — brakes applied but vehicle is accelerating
-    if any_braking and accel_ms2 > ACCEL_BRAKING_THRESHOLD_MS2:
-        return {
-            "misbehavior":  "brakes_on_no_decel",
-            "accel_ms2":    round(accel_ms2, 4),
-            "accel_g":      round(accel_ms2 / G_MS2, 4),
-            "threshold_ms2": ACCEL_BRAKING_THRESHOLD_MS2,
-            "wheel_brakes": core["brakes"]["wheelBrakes"],
-        }
 
-    # Case 2 — heavy deceleration with no wheel brakes active
-    if not any_braking and accel_ms2 < -DECEL_NO_BRAKES_THRESHOLD_MS2:
-        return {
-            "misbehavior":  "decel_no_brakes",
-            "accel_ms2":    round(accel_ms2, 4),
-            "accel_g":      round(accel_ms2 / G_MS2, 4),
-            "threshold_ms2": -DECEL_NO_BRAKES_THRESHOLD_MS2,
-            "wheel_brakes": core["brakes"]["wheelBrakes"],
-        }
+# Module-level singleton — allows `from detectors.brakes_inconsistency import check`
+_detector = BrakesInconsistencyDetector()
 
-    return None
+
+def check(bsm: dict) -> Optional[dict]:
+    return _detector.check(bsm)
