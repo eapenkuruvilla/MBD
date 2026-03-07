@@ -54,6 +54,7 @@ Elasticsearch          ← Index: mbd-misbehaviors-YYYY.MM.dd
 |---|---|
 | `detector.py` | Reads BSMs, runs detectors, writes `logs/misbehaviors.log` |
 | `detectors/` | Nine physics-based detector modules |
+| `ode_config.json` | Detector thresholds and Logstash endpoint URL |
 | `logs/misbehaviors.log` | JSON-lines event log consumed by Logstash |
 | Logstash | Ships log lines to Elasticsearch; creates date-stamped indices |
 | Elasticsearch | Stores events; hosts the `mbd-display` filtered alias |
@@ -450,7 +451,7 @@ The system uses two filtering levels:
 
 | Level | Description | Where configured |
 |---|---|---|
-| **L1** | Detector fires: the physics check failed | Threshold constants in each `detectors/*.py` file |
+| **L1** | Detector fires: the physics check failed | `ode_config.json` |
 | **L2** | Display filter: higher-confidence subset shown in Kibana | `thresholds.json` → `mbd-display` ES alias |
 
 **L1** produces all flagged events in `logs/misbehaviors.log` and in the
@@ -743,6 +744,9 @@ docker compose up setup
 # Run with explicit paths
 python detector.py data/tampa_BSM_2021.zip --log logs/misbehaviors.log
 
+# Override the default config file
+python detector.py data/tampa_BSM_2021.zip --config ode_config.json
+
 # Fresh run — truncate the log first
 python detector.py data/tampa_BSM_2021.zip --log logs/misbehaviors.log --clear
 
@@ -998,7 +1002,17 @@ Kubernetes cluster.  In that model:
   providing buffering, back-pressure handling, and field normalisation before
   events reach Elasticsearch.
 
-Key changes required relative to the current design:
+**Already implemented toward ODE deployment:**
+
+- `_process_bsm(bsm: dict, …)` in `detector.py` processes a single BSM dict
+  and returns `(flagged, suppressed)`.  This is the intended ODE hook — the
+  same function the batch loop calls internally, ready to be wired to a live
+  BSM stream without any detector code changes.
+- `ode_config.json` carries the Logstash endpoint URL (`logstash.url`) so
+  each deployed agent can be pointed at the correct remote Logstash instance
+  via config without code changes.
+
+Key changes still required relative to the current design:
 
 | Concern | Current | Production |
 |---|---|---|
@@ -1180,9 +1194,10 @@ is reachable would surface misconfiguration before a long detector run.
 
 ```
 MBD/
-├── detector.py                  Main entry point — reads BSMs, runs detectors
+├── detector.py                  Main entry point — reads BSMs, runs detectors; _process_bsm() is the ODE hook
 ├── replay.py                    Troubleshooting tool — animates a vehicle's BSM movement on a map
 ├── manage_display_filter.py     Pushes L2 thresholds to ES; creates mbd-display data view
+├── ode_config.json              ODE configuration: Logstash endpoint and L1 detector thresholds
 ├── thresholds.json              L2 display thresholds (editable)
 ├── Makefile                     Single entry point for all common operations
 ├── requirements.txt             Python dependencies

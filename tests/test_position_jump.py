@@ -20,8 +20,8 @@ LAT3, LON3 = 41.002, -81.0   # another ~111 m north
 
 
 @pytest.fixture
-def det():
-    return PositionJumpDetector()
+def det(det_config):
+    return PositionJumpDetector(det_config.section("position_jump"), det_config.confirm_n)
 
 
 def test_first_message_returns_none(det):
@@ -92,10 +92,12 @@ def test_missing_secmark_returns_none(det):
     assert result is None
 
 
-def test_each_instance_is_independent():
-    # State is per-instance; a fresh detector has no memory
-    det1 = PositionJumpDetector()
-    det2 = PositionJumpDetector()
+def test_each_instance_is_independent(det_config):
+    cfg = det_config.section("position_jump")
+    n   = det_config.confirm_n
+
+    det1 = PositionJumpDetector(cfg, n)
+    det2 = PositionJumpDetector(cfg, n)
 
     det1.check(make_bsm(lat_deg=LAT1, secmark=0))
     det1.check(make_bsm(lat_deg=LAT2, secmark=100))           # streak=1

@@ -12,14 +12,14 @@ from typing import Optional
 
 from .utils import MS_TO_KMH, SPEED_UNAVAILABLE, SPEED_UNIT_MS, get_core
 
-THRESHOLD_KMH = 200.0
-
 
 class SpeedDetector:
     """Stateless detector — flags BSMs where reported speed exceeds the threshold."""
 
+    def __init__(self, cfg: dict):
+        self.threshold_kmh = float(cfg["threshold_kmh"])
+
     def check(self, bsm: dict) -> Optional[dict]:
-        """Returns a misbehavior record if speed exceeds the threshold, else None."""
         core = get_core(bsm)
 
         raw = core.get("speed")
@@ -36,20 +36,12 @@ class SpeedDetector:
 
         speed_kmh = raw * SPEED_UNIT_MS * MS_TO_KMH
 
-        if speed_kmh <= THRESHOLD_KMH:
+        if speed_kmh <= self.threshold_kmh:
             return None
 
         return {
-            "misbehavior": "speed_exceeded",
-            "speed_kmh": round(speed_kmh, 2),
-            "threshold_kmh": THRESHOLD_KMH,
-            "speed_raw": raw,
+            "misbehavior":   "speed_exceeded",
+            "speed_kmh":     round(speed_kmh, 2),
+            "threshold_kmh": self.threshold_kmh,
+            "speed_raw":     raw,
         }
-
-
-# Module-level singleton — allows direct `from detectors import speed; speed.check(bsm)`
-_detector = SpeedDetector()
-
-
-def check(bsm: dict) -> Optional[dict]:
-    return _detector.check(bsm)

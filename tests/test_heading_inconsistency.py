@@ -24,8 +24,10 @@ LAT3, LON3 = 41.0004, -81.0   # ~44 m north; GPS bearing ≈ 0°
 
 
 @pytest.fixture
-def det():
-    return HeadingInconsistencyDetector()
+def det(det_config):
+    return HeadingInconsistencyDetector(
+        det_config.section("heading_inconsistency"), det_config.confirm_n
+    )
 
 
 def test_first_message_returns_none(det):

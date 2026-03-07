@@ -23,8 +23,10 @@ LAT3, LON3 = 41.0004, -81.0   # ~44 m north
 
 
 @pytest.fixture
-def det():
-    return YawRateConsistencyDetector()
+def det(det_config):
+    return YawRateConsistencyDetector(
+        det_config.section("yaw_rate"), det_config.confirm_n
+    )
 
 
 def test_first_message_returns_none(det):

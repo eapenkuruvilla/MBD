@@ -39,13 +39,6 @@ from .utils import (
     SPEED_UNIT_MS, SPEED_UNAVAILABLE, YAW_UNIT, YAW_UNAVAILABLE, MS_TO_KMH,
 )
 
-MAX_YAW_DIFF_DEG_S = 90.0
-SPEED_GATE_KMH     = 20.0   # km/h — applied to both current and previous speed
-MAX_GPS_ACCURACY_M =  5.0   # metres
-MIN_GAP_SECONDS    =  0.05
-MAX_GAP_SECONDS    =  0.15
-MIN_DISTANCE_M     =  5.0
-
 
 def _signed_heading_delta(h_prev: float, h_curr: float) -> float:
     """
@@ -61,9 +54,14 @@ def _signed_heading_delta(h_prev: float, h_curr: float) -> float:
 class YawRateConsistencyDetector(BaseDetector):
     """Stateful detector — tracks last heading/position/speed/time per vehicle."""
 
-    def __init__(self):
-        # vehicle_id -> (heading_deg, lat, lon, secmark, speed_kmh)
-        super().__init__()
+    def __init__(self, cfg: dict, confirm_n: int):
+        super().__init__(confirm_n)
+        self.max_yaw_diff_deg_s = float(cfg["max_yaw_diff_deg_s"])
+        self.speed_gate_kmh     = float(cfg["speed_gate_kmh"])
+        self.max_gps_accuracy_m = float(cfg["max_gps_accuracy_m"])
+        self.min_gap_seconds    = float(cfg["min_gap_seconds"])
+        self.max_gap_seconds    = float(cfg["max_gap_seconds"])
+        self.min_distance_m     = float(cfg["min_distance_m"])
 
     def check(self, bsm: dict) -> Optional[dict]:
         core = get_core(bsm)
@@ -104,23 +102,23 @@ class YawRateConsistencyDetector(BaseDetector):
         prev_heading, prev_lat, prev_lon, prev_secmark, prev_speed_kmh = prev
 
         # Speed gate — skip if either end of the interval was slow
-        if speed_kmh < SPEED_GATE_KMH or prev_speed_kmh < SPEED_GATE_KMH:
+        if speed_kmh < self.speed_gate_kmh or prev_speed_kmh < self.speed_gate_kmh:
             return None
 
         # GPS accuracy gate
         accuracy_m = _parse_accuracy_m(core)
-        if accuracy_m is not None and accuracy_m > MAX_GPS_ACCURACY_M:
+        if accuracy_m is not None and accuracy_m > self.max_gps_accuracy_m:
             return None
 
         if secmark is None or prev_secmark is None:
             return None
 
         elapsed_s = _secmark_elapsed_s(prev_secmark, secmark)
-        if elapsed_s < MIN_GAP_SECONDS or elapsed_s > MAX_GAP_SECONDS:
+        if elapsed_s < self.min_gap_seconds or elapsed_s > self.max_gap_seconds:
             return None
 
         distance_m = _haversine_m(prev_lat, prev_lon, lat, lon)
-        if distance_m < MIN_DISTANCE_M:
+        if distance_m < self.min_distance_m:
             return None
 
         signed_delta       = _signed_heading_delta(prev_heading, heading_deg)
@@ -128,7 +126,7 @@ class YawRateConsistencyDetector(BaseDetector):
 
         yaw_diff = abs(yaw_rate_deg_s - gps_yaw_rate_deg_s)
 
-        if yaw_diff <= MAX_YAW_DIFF_DEG_S:
+        if yaw_diff <= self.max_yaw_diff_deg_s:
             self._reset_streak(vehicle_id)
             return None
 
@@ -140,7 +138,7 @@ class YawRateConsistencyDetector(BaseDetector):
             "reported_yaw_deg_s":    round(yaw_rate_deg_s, 3),
             "gps_yaw_rate_deg_s":    round(gps_yaw_rate_deg_s, 3),
             "yaw_diff_deg_s":        round(yaw_diff, 3),
-            "threshold_deg_s":       MAX_YAW_DIFF_DEG_S,
+            "threshold_deg_s":       self.max_yaw_diff_deg_s,
             "elapsed_s":             round(elapsed_s, 3),
             "speed_kmh":             round(speed_kmh, 2),
         }

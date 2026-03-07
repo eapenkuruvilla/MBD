@@ -33,13 +33,6 @@ from .utils import (
     HEADING_UNIT, HEADING_UNAVAILABLE,
 )
 
-MAX_HEADING_DIFF_DEG = 90.0   # degrees
-SPEED_GATE_KMH       = 20.0   # km/h — applied to both current and previous speed
-MAX_GPS_ACCURACY_M   =  5.0   # metres — skip if positional fix is too poor
-MIN_DISTANCE_M       =  5.0   # metres
-MIN_GAP_SECONDS      =  0.05  # seconds
-MAX_GAP_SECONDS      =  0.15  # seconds
-
 
 def _bearing_deg(lat1, lon1, lat2, lon2) -> float:
     """Forward azimuth from point-1 to point-2, returned as 0–360°."""
@@ -54,9 +47,14 @@ def _bearing_deg(lat1, lon1, lat2, lon2) -> float:
 class HeadingInconsistencyDetector(BaseDetector):
     """Stateful detector — tracks last position/speed per vehicle to derive bearing."""
 
-    def __init__(self):
-        # vehicle_id -> (lat, lon, secmark, speed_kmh)
-        super().__init__()
+    def __init__(self, cfg: dict, confirm_n: int):
+        super().__init__(confirm_n)
+        self.max_heading_diff_deg = float(cfg["max_heading_diff_deg"])
+        self.speed_gate_kmh       = float(cfg["speed_gate_kmh"])
+        self.max_gps_accuracy_m   = float(cfg["max_gps_accuracy_m"])
+        self.min_distance_m       = float(cfg["min_distance_m"])
+        self.min_gap_seconds      = float(cfg["min_gap_seconds"])
+        self.max_gap_seconds      = float(cfg["max_gap_seconds"])
 
     def check(self, bsm: dict) -> Optional[dict]:
         core = get_core(bsm)
@@ -94,29 +92,29 @@ class HeadingInconsistencyDetector(BaseDetector):
         prev_lat, prev_lon, prev_secmark, prev_speed_kmh = prev
 
         # Speed gate — skip if either end of the interval was slow (turning/parking)
-        if speed_kmh < SPEED_GATE_KMH or prev_speed_kmh < SPEED_GATE_KMH:
+        if speed_kmh < self.speed_gate_kmh or prev_speed_kmh < self.speed_gate_kmh:
             return None
 
         # GPS accuracy gate — skip if positional fix is too poor for bearing calc
         accuracy_m = _parse_accuracy_m(core)
-        if accuracy_m is not None and accuracy_m > MAX_GPS_ACCURACY_M:
+        if accuracy_m is not None and accuracy_m > self.max_gps_accuracy_m:
             return None
 
         if secmark is None or prev_secmark is None:
             return None
 
         elapsed_s = _secmark_elapsed_s(prev_secmark, secmark)
-        if elapsed_s < MIN_GAP_SECONDS or elapsed_s > MAX_GAP_SECONDS:
+        if elapsed_s < self.min_gap_seconds or elapsed_s > self.max_gap_seconds:
             return None
 
         distance_m = _haversine_m(prev_lat, prev_lon, lat, lon)
-        if distance_m < MIN_DISTANCE_M:
+        if distance_m < self.min_distance_m:
             return None
 
         gps_bearing  = _bearing_deg(prev_lat, prev_lon, lat, lon)
         heading_diff = _angular_diff(reported_deg, gps_bearing)
 
-        if heading_diff <= MAX_HEADING_DIFF_DEG:
+        if heading_diff <= self.max_heading_diff_deg:
             self._reset_streak(vehicle_id)
             return None
 
@@ -128,7 +126,7 @@ class HeadingInconsistencyDetector(BaseDetector):
             "reported_heading": round(reported_deg, 2),
             "gps_bearing":      round(gps_bearing, 2),
             "heading_diff":     round(heading_diff, 2),
-            "threshold_deg":    MAX_HEADING_DIFF_DEG,
+            "threshold_deg":    self.max_heading_diff_deg,
             "speed_kmh":        round(speed_kmh, 2),
             "distance_m":       round(distance_m, 1),
         }

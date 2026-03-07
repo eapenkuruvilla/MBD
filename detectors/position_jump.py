@@ -26,19 +26,17 @@ from .utils import (
     BaseDetector, LAT_SCALE, LON_SCALE, MS_TO_KMH, get_core,
 )
 
-MAX_JUMP_SPEED_KMH = 10.0   # km/h — implied speed must exceed this
-MIN_JUMP_METERS    = 100.0  # m    — filters out GPS noise on tiny Δt
-MAX_GPS_ACCURACY_M =   5.0  # m    — skip if positional fix is too poor
-MIN_GAP_SECONDS    =  0.05  # s    — pairs closer than this are timing artifacts
-MAX_GAP_SECONDS    =  0.15  # s    — ignore gaps longer than this
-
 
 class PositionJumpDetector(BaseDetector):
     """Stateful detector — tracks the last known position per vehicle."""
 
-    def __init__(self):
-        # vehicle_id -> (lat, lon, secmark)
-        super().__init__()
+    def __init__(self, cfg: dict, confirm_n: int):
+        super().__init__(confirm_n)
+        self.max_jump_speed_kmh = float(cfg["max_jump_speed_kmh"])
+        self.min_jump_meters    = float(cfg["min_jump_meters"])
+        self.max_gps_accuracy_m = float(cfg["max_gps_accuracy_m"])
+        self.min_gap_seconds    = float(cfg["min_gap_seconds"])
+        self.max_gap_seconds    = float(cfg["max_gap_seconds"])
 
     def check(self, bsm: dict) -> Optional[dict]:
         core = get_core(bsm)
@@ -70,18 +68,18 @@ class PositionJumpDetector(BaseDetector):
             return None
 
         elapsed_s = _secmark_elapsed_s(prev_secmark, secmark)
-        if elapsed_s < MIN_GAP_SECONDS or elapsed_s > MAX_GAP_SECONDS:
+        if elapsed_s < self.min_gap_seconds or elapsed_s > self.max_gap_seconds:
             return None
 
         # GPS accuracy gate — poor fix can masquerade as a position jump
         accuracy_m = _parse_accuracy_m(core)
-        if accuracy_m is not None and accuracy_m > MAX_GPS_ACCURACY_M:
+        if accuracy_m is not None and accuracy_m > self.max_gps_accuracy_m:
             return None
 
         distance_m  = _haversine_m(prev_lat, prev_lon, lat, lon)
         implied_kmh = (distance_m / elapsed_s) * MS_TO_KMH
 
-        if distance_m < MIN_JUMP_METERS or implied_kmh <= MAX_JUMP_SPEED_KMH:
+        if distance_m < self.min_jump_meters or implied_kmh <= self.max_jump_speed_kmh:
             self._reset_streak(vehicle_id)
             return None
 
@@ -93,7 +91,7 @@ class PositionJumpDetector(BaseDetector):
             "jump_m":            round(distance_m, 1),
             "elapsed_s":         round(elapsed_s, 3),
             "implied_speed_kmh": round(implied_kmh, 2),
-            "threshold_kmh":     MAX_JUMP_SPEED_KMH,
+            "threshold_kmh":     self.max_jump_speed_kmh,
             "prev_lat":          prev_lat,
             "prev_lon":          prev_lon,
         }

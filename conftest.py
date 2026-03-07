@@ -5,6 +5,11 @@ SAE J2735 encoding constants the detectors use, so tests stay DRY and
 don't need to hand-roll raw integer values.
 """
 
+from pathlib import Path
+
+import pytest
+
+from detectors.config import DetectorConfig
 from detectors.utils import (
     LAT_SCALE, LON_SCALE,
     SPEED_UNIT_MS, MS_TO_KMH,
@@ -13,6 +18,14 @@ from detectors.utils import (
     YAW_UNIT,
     ACCURACY_UNIT_M,
 )
+
+_THRESHOLD_FILE = Path(__file__).parent / "ode_config.json"
+
+
+@pytest.fixture(scope="session")
+def det_config() -> DetectorConfig:
+    """Load the project threshold config once per test session."""
+    return DetectorConfig.from_file(_THRESHOLD_FILE)
 
 
 def make_bsm(

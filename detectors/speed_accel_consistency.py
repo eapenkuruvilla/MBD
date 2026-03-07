@@ -29,19 +29,15 @@ from .utils import (
     SPEED_UNIT_MS, SPEED_UNAVAILABLE, ACCEL_UNIT_MS2, ACCEL_UNAVAILABLE, MS_TO_KMH,
 )
 
-MAX_DELTA_ERROR_MS  = 5.0
-MIN_GAP_SECONDS     = 0.05
-MAX_GAP_SECONDS     = 0.15
-MIN_DELTA_SPEED_KMH = 20.0
-MIN_DELTA_SPEED_MS  = MIN_DELTA_SPEED_KMH / MS_TO_KMH
-
-
 class SpeedAccelConsistencyDetector(BaseDetector):
     """Stateful detector — tracks last speed/accel/time per vehicle."""
 
-    def __init__(self):
-        # vehicle_id -> (speed_ms, accel_ms2, secmark)
-        super().__init__()
+    def __init__(self, cfg: dict, confirm_n: int):
+        super().__init__(confirm_n)
+        self.max_delta_error_ms  = float(cfg["max_delta_error_ms"])
+        self.min_gap_seconds     = float(cfg["min_gap_seconds"])
+        self.max_gap_seconds     = float(cfg["max_gap_seconds"])
+        self.min_delta_speed_ms  = float(cfg["min_delta_speed_kmh"]) / MS_TO_KMH
 
     def check(self, bsm: dict) -> Optional[dict]:
         core = get_core(bsm)
@@ -78,17 +74,17 @@ class SpeedAccelConsistencyDetector(BaseDetector):
             return None
 
         elapsed_s = _secmark_elapsed_s(prev_secmark, secmark)
-        if elapsed_s < MIN_GAP_SECONDS or elapsed_s > MAX_GAP_SECONDS:
+        if elapsed_s < self.min_gap_seconds or elapsed_s > self.max_gap_seconds:
             return None
 
         observed_delta  = speed_ms - prev_speed_ms
         expected_delta  = prev_accel_ms2 * elapsed_s
         error_ms        = abs(observed_delta - expected_delta)
 
-        if abs(observed_delta) < MIN_DELTA_SPEED_MS:
+        if abs(observed_delta) < self.min_delta_speed_ms:
             return None
 
-        if error_ms <= MAX_DELTA_ERROR_MS:
+        if error_ms <= self.max_delta_error_ms:
             self._reset_streak(vehicle_id)
             return None
 
@@ -101,7 +97,7 @@ class SpeedAccelConsistencyDetector(BaseDetector):
             "expected_delta_ms": round(expected_delta, 4),
             "error_ms":          round(error_ms, 4),
             "error_kmh":         round(error_ms * MS_TO_KMH, 2),
-            "threshold_ms":      MAX_DELTA_ERROR_MS,
+            "threshold_ms":      self.max_delta_error_ms,
             "accel_ms2":         round(prev_accel_ms2, 4),
             "elapsed_s":         round(elapsed_s, 3),
         }

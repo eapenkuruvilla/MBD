@@ -150,12 +150,12 @@ class BaseDetector:
     """Lightweight base for detectors that maintain per-vehicle state.
 
     Subclasses store whatever tuple they need in ``self._last[vehicle_id]``
-    and call ``super().__init__()`` from their own ``__init__``.
+    and call ``super().__init__(confirm_n)`` from their own ``__init__``.
 
     Multi-message confirmation
     --------------------------
     Detectors use ``_increment_streak`` / ``_reset_streak`` to require
-    CONFIRM_N consecutive violations before emitting a misbehavior event.
+    confirm_n consecutive violations before emitting a misbehavior event.
     This eliminates single-message GPS artefacts (tunnel exits, multipath).
 
     Pattern in each detector's check():
@@ -172,9 +172,8 @@ class BaseDetector:
     correctly.
     """
 
-    CONFIRM_N = 2   # consecutive violations required before flagging
-
-    def __init__(self):
+    def __init__(self, confirm_n: int):
+        self.CONFIRM_N = confirm_n
         self._last:   dict = {}
         self._streak: dict = {}   # vehicle_id → consecutive violation count
 

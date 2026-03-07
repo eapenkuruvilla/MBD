@@ -18,8 +18,10 @@ LAT3, LON3 = 41.004, -81.0   # another ~222 m north
 
 
 @pytest.fixture
-def det():
-    return SpeedPositionConsistencyDetector()
+def det(det_config):
+    return SpeedPositionConsistencyDetector(
+        det_config.section("speed_position"), det_config.confirm_n
+    )
 
 
 def test_first_message_returns_none(det):

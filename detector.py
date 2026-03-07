@@ -10,7 +10,7 @@ Input can be:
     every non-directory entry in the archive is treated as a data file.
 
 Usage:
-    python detector.py <bsm_file_or_zip> [--log <log_file>]
+    python detector.py <bsm_file_or_zip> [--log <log_file>] [--config <config_file>]
 """
 
 import argparse
@@ -26,6 +26,7 @@ from pathlib import Path
 
 from detectors.accel import AccelDetector
 from detectors.brakes_inconsistency import BrakesInconsistencyDetector
+from detectors.config import DetectorConfig
 from detectors.heading_change_rate import HeadingChangeRateDetector
 from detectors.heading_inconsistency import HeadingInconsistencyDetector
 from detectors.position_jump import PositionJumpDetector
@@ -34,26 +35,6 @@ from detectors.speed_accel_consistency import SpeedAccelConsistencyDetector
 from detectors.speed_position_consistency import SpeedPositionConsistencyDetector
 from detectors.yaw_rate_consistency import YawRateConsistencyDetector
 from detectors.utils import LAT_SCALE, LON_SCALE, _haversine_m, _parse_time, get_core
-
-# Register detectors here as more are added.  All entries are class instances
-# with a check(bsm) -> Optional[dict] method.
-DETECTORS = [
-    SpeedDetector(),
-    AccelDetector(),
-    BrakesInconsistencyDetector(),
-    PositionJumpDetector(),
-    HeadingInconsistencyDetector(),
-    SpeedPositionConsistencyDetector(),
-    SpeedAccelConsistencyDetector(),
-    HeadingChangeRateDetector(),
-    YawRateConsistencyDetector(),
-]
-
-# Suppress duplicate events: same vehicle+type within this distance OR time.
-# OR is intentional: a fast-moving vehicle exits COOLDOWN_METERS in < 1 s at
-# highway speed, so AND would never suppress speed/accel events in motion.
-COOLDOWN_METERS = 50.0
-COOLDOWN_SECONDS = 30.0
 
 # Progress line update interval (seconds).
 PROGRESS_INTERVAL = 1.0
@@ -78,6 +59,22 @@ _TYPE_ABBREV = {
 # Tracks how many lines the last _progress() call printed (0, 1, or 2).
 # Used to correctly overwrite the previous output with ANSI cursor-up.
 _progress_line_count = 0
+
+
+def _build_detectors(cfg: DetectorConfig) -> list:
+    """Instantiate all detectors from a loaded config."""
+    n = cfg.confirm_n
+    return [
+        SpeedDetector(cfg.section("speed")),
+        AccelDetector(cfg.section("accel")),
+        BrakesInconsistencyDetector(cfg.section("brakes")),
+        PositionJumpDetector(cfg.section("position_jump"), n),
+        HeadingInconsistencyDetector(cfg.section("heading_inconsistency"), n),
+        SpeedPositionConsistencyDetector(cfg.section("speed_position"), n),
+        SpeedAccelConsistencyDetector(cfg.section("speed_accel"), n),
+        HeadingChangeRateDetector(cfg.section("heading_change_rate"), n),
+        YawRateConsistencyDetector(cfg.section("yaw_rate"), n),
+    ]
 
 
 def _fmt_eta(seconds: float) -> str:
@@ -147,6 +144,11 @@ def parse_args():
         help="Output log file path (default: logs/misbehaviors.log)",
     )
     parser.add_argument(
+        "--config",
+        default="ode_config.json",
+        help="ODE config file (default: ode_config.json)",
+    )
+    parser.add_argument(
         "--clear",
         action="store_true",
         help="Truncate the log file before writing (removes entries from previous runs)",
@@ -173,7 +175,63 @@ def extract_context(bsm: dict) -> dict:
     }
 
 
+def _process_bsm(bsm: dict, log_f, cooldown: dict, counts: dict,
+                 detectors: list, cooldown_meters: float, cooldown_seconds: float) -> tuple:
+    """
+    Run all detectors against a single BSM dict.  Writes any flagged events
+    to log_f and updates cooldown and counts in place.
+
+    Returns (flagged, suppressed) counts for this BSM.
+
+    This is the ODE hook — called once per incoming BSM message on deployment.
+    """
+    flagged = 0
+    suppressed = 0
+    context = extract_context(bsm)
+
+    for detector in detectors:
+        result = detector.check(bsm)
+        if result is None:
+            continue
+
+        key = (context["vehicle_id"], result["misbehavior"])
+        lat, lon = context.get("lat"), context.get("lon")
+        bsm_time = _parse_time(context.get("record_generated_at", ""))
+        prev = cooldown.get(key)
+
+        if prev is not None and lat is not None and lon is not None:
+            prev_lat, prev_lon, prev_time = prev
+            close_space = _haversine_m(lat, lon, prev_lat, prev_lon) <= cooldown_meters
+            if bsm_time is not None and prev_time is not None:
+                close_time = (
+                    abs((bsm_time - prev_time).total_seconds()) <= cooldown_seconds
+                )
+            else:
+                close_time = False
+            if close_space or close_time:
+                suppressed += 1
+                continue
+
+        cooldown[key] = (lat, lon, bsm_time)
+
+        event_id = hashlib.sha1(
+            f"{context['vehicle_id']}|{context['record_generated_at']}|{result['misbehavior']}".encode()
+        ).hexdigest()[:16]
+        log_entry = {
+            "detected_at": datetime.now(timezone.utc).isoformat(),
+            "event_id": event_id,
+            **context,
+            **result,
+        }
+        log_f.write(json.dumps(log_entry) + "\n")
+        flagged += 1
+        counts[result["misbehavior"]] += 1
+
+    return flagged, suppressed
+
+
 def _process_lines(lines, log_f, cooldown: dict, counts: dict,
+                   detectors: list, cooldown_meters: float, cooldown_seconds: float,
                    report_progress: bool = False):
     """
     Core processing loop.  Runs all detectors over an iterable of raw text
@@ -216,56 +274,26 @@ def _process_lines(lines, log_f, cooldown: dict, counts: dict,
             print(f"[WARN] line {line_num}: JSON parse error – {exc}", file=sys.stderr)
             continue
 
-        context = extract_context(bsm)
-
-        for detector in DETECTORS:
-            result = detector.check(bsm)
-            if result is None:
-                continue
-
-            key = (context["vehicle_id"], result["misbehavior"])
-            lat, lon = context.get("lat"), context.get("lon")
-            bsm_time = _parse_time(context.get("record_generated_at", ""))
-            prev = cooldown.get(key)
-
-            if prev is not None and lat is not None and lon is not None:
-                prev_lat, prev_lon, prev_time = prev
-                close_space = _haversine_m(lat, lon, prev_lat, prev_lon) <= COOLDOWN_METERS
-                if bsm_time is not None and prev_time is not None:
-                    close_time = (
-                        abs((bsm_time - prev_time).total_seconds()) <= COOLDOWN_SECONDS
-                    )
-                else:
-                    close_time = False
-                if close_space or close_time:
-                    suppressed += 1
-                    continue
-
-            cooldown[key] = (lat, lon, bsm_time)
-
-            event_id = hashlib.sha1(
-                f"{context['vehicle_id']}|{context['record_generated_at']}|{result['misbehavior']}".encode()
-            ).hexdigest()[:16]
-            log_entry = {
-                "detected_at": datetime.now(timezone.utc).isoformat(),
-                "event_id": event_id,
-                **context,
-                **result,
-            }
-            log_f.write(json.dumps(log_entry) + "\n")
-            flagged += 1
-            counts[result["misbehavior"]] += 1
+        fl, sup = _process_bsm(bsm, log_f, cooldown, counts,
+                               detectors, cooldown_meters, cooldown_seconds)
+        flagged += fl
+        suppressed += sup
 
     return total, flagged, suppressed
 
 
-def process_input(bsm_path: Path, log_path: Path, clear: bool = False):
+def process_input(bsm_path: Path, log_path: Path, cfg: DetectorConfig,
+                  clear: bool = False):
     """
     Process a plain NDJSON file or a ZIP archive.  Returns
     (total_records, total_flagged, total_suppressed, counts_by_type).
     When clear=True the log is truncated; otherwise new entries are appended.
     """
     log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    detectors       = _build_detectors(cfg)
+    cooldown_meters  = cfg.cooldown_meters
+    cooldown_seconds = cfg.cooldown_seconds
 
     total = 0
     flagged = 0
@@ -285,7 +313,10 @@ def process_input(bsm_path: Path, log_path: Path, clear: bool = False):
                 for i, entry in enumerate(data_entries, start=1):
                     with zf.open(entry) as raw_f:
                         lines = io.TextIOWrapper(raw_f, encoding="utf-8", errors="replace")
-                        t, fl, sup = _process_lines(lines, log_f, cooldown, counts)
+                        t, fl, sup = _process_lines(
+                            lines, log_f, cooldown, counts,
+                            detectors, cooldown_meters, cooldown_seconds,
+                        )
                     total += t
                     flagged += fl
                     suppressed += sup
@@ -312,8 +343,11 @@ def process_input(bsm_path: Path, log_path: Path, clear: bool = False):
                 print()  # move past the progress line
         else:
             with bsm_path.open() as f:
-                t, fl, sup = _process_lines(f, log_f, cooldown, counts,
-                                            report_progress=True)
+                t, fl, sup = _process_lines(
+                    f, log_f, cooldown, counts,
+                    detectors, cooldown_meters, cooldown_seconds,
+                    report_progress=True,
+                )
             print()  # move past the progress line
             total += t
             flagged += fl
@@ -336,17 +370,23 @@ def _print_summary(total, flagged, suppressed, counts):
 
 def main():
     args = parse_args()
-    bsm_path = Path(args.bsm_file)
-    log_path = Path(args.log)
+    bsm_path    = Path(args.bsm_file)
+    log_path    = Path(args.log)
+    config_path = Path(args.config)
 
     if not bsm_path.exists():
         print(f"Error: file not found: {bsm_path}", file=sys.stderr)
         sys.exit(1)
 
+    cfg = DetectorConfig.from_file(config_path)
+
     print(f"Input  : {bsm_path}")
     print(f"Log    : {log_path}{'  (clearing)' if args.clear else ''}")
+    print(f"Config : {config_path}")
 
-    total, flagged, suppressed, counts = process_input(bsm_path, log_path, clear=args.clear)
+    total, flagged, suppressed, counts = process_input(
+        bsm_path, log_path, cfg, clear=args.clear
+    )
     _print_summary(total, flagged, suppressed, counts)
 
 

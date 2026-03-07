@@ -31,8 +31,10 @@ def _acc_raw(ms2: float) -> int:
 
 
 @pytest.fixture
-def det():
-    return SpeedAccelConsistencyDetector()
+def det(det_config):
+    return SpeedAccelConsistencyDetector(
+        det_config.section("speed_accel"), det_config.confirm_n
+    )
 
 
 def test_first_message_returns_none(det):
