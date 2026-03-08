@@ -28,6 +28,7 @@ services:
       - ./logs:/mbd/logs:ro
       - logstash_data:/usr/share/logstash/data
     ports:
+      - "5044:5044"
       - "9600:9600"
     depends_on:
       elasticsearch:

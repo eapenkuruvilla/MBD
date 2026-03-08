@@ -15,6 +15,7 @@ from pathlib import Path
 # Top-level scalars map to None; sections map to their required sub-keys.
 _REQUIRED: dict = {
     "logstash":             ["url"],
+    "kafka":                ["bootstrap_servers", "topic", "group_id"],
     "confirm_n":            None,
     "cooldown":             ["meters", "seconds"],
     "speed":                ["threshold_kmh"],

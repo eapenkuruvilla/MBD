@@ -3,6 +3,12 @@
     "url": "tcp://logstash:5044"
   },
 
+  "kafka": {
+    "bootstrap_servers": "kafka:9092",
+    "topic":             "topic.OdeBsmJson",
+    "group_id":          "bsm_mbd_group"
+  },
+
   "confirm_n": 2,
 
   "cooldown": {

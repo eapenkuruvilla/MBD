@@ -8,7 +8,7 @@ filebeat.inputs:
     json.overwrite_keys: true
 
 output.logstash:
-  hosts: ["logstash:5044"]
+  hosts: ["${LOGSTASH_URL:logstash:5044}"]
 
 logging.level: info
 logging.to_files: false

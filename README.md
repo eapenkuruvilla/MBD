@@ -13,31 +13,34 @@ anomalous behaviour, and visualises findings in Kibana.
 3. [Quick Start](#quick-start)
 4. [Workflow: Ingesting New Data](#workflow-ingesting-new-data)
 5. [Workflow: Wiping Data and Starting Fresh](#workflow-wiping-data-and-starting-fresh)
-6. [Makefile Reference](#makefile-reference)
-7. [Detectors](#detectors)
-8. [Threshold System (L1 / L2)](#threshold-system-l1--l2)
-9. [Kibana Dashboards](#kibana-dashboards)
-10. [Network Access & Security](#network-access--security)
-11. [Troubleshooting](#troubleshooting)
-12. [Vehicle Replay Tool](#vehicle-replay-tool)
-13. [Development: Unit Tests](#development-unit-tests)
-14. [Future Work](#future-work)
-15. [Project Structure](#project-structure)
+6. [Workflow: ODE Mode (Kafka)](#workflow-ode-mode-kafka)
+7. [Makefile Reference](#makefile-reference)
+8. [Detectors](#detectors)
+9. [Threshold System (L1 / L2)](#threshold-system-l1--l2)
+10. [Kibana Dashboards](#kibana-dashboards)
+11. [Network Access & Security](#network-access--security)
+12. [Troubleshooting](#troubleshooting)
+13. [Vehicle Replay Tool](#vehicle-replay-tool)
+14. [Development: Unit Tests](#development-unit-tests)
+15. [Future Work](#future-work)
+16. [Project Structure](#project-structure)
 
 ---
 
 ## Architecture
+
+### Local / batch mode
 
 ```
 BSM data file(s)
 (NDJSON or ZIP)
        │
        ▼
- detector.py          ← Python: runs all 9 detectors, one BSM at a time
+ detector.py          ← runs all 9 detectors via _process_bsm(), one BSM at a time
        │
        │  logs/misbehaviors.log  (JSON-lines, one event per line)
        ▼
-  Logstash             ← Filebeat watches the log; Logstash parses & ships
+  Logstash             ← reads log file directly; parses & indexes
        │
        ▼
 Elasticsearch          ← Index: mbd-misbehaviors-YYYY.MM.dd
@@ -48,25 +51,49 @@ Elasticsearch          ← Index: mbd-misbehaviors-YYYY.MM.dd
    Kibana               ← Dashboards and KPI panels
 ```
 
+### ODE / streaming mode
+
+```
+ODE Kafka
+(topic.OdeBsmJson)
+       │
+       ▼
+ bsm_agent.py         ← subscribes per RSU; calls _process_bsm() for each BSM
+       │
+       │  logs/misbehaviors.log  (JSON-lines, one event per line)
+       ▼
+  Filebeat             ← tails log; ships to remote Logstash via Beats protocol
+       │
+       ▼
+  Logstash (remote)    ← parses & indexes
+       │
+       ▼
+Elasticsearch + Kibana
+```
+
 **Key components:**
 
 | Component | Role |
 |---|---|
-| `detector.py` | Reads BSMs, runs detectors, writes `logs/misbehaviors.log` |
+| `detector.py` | Batch entry point — reads BSM files/ZIPs, calls `_process_bsm()` |
+| `bsm_agent.py` | ODE entry point — Kafka consumer, calls `_process_bsm()` per BSM |
 | `detectors/` | Nine physics-based detector modules |
-| `ode_config.json` | Detector thresholds and Logstash endpoint URL |
-| `logs/misbehaviors.log` | JSON-lines event log consumed by Logstash |
-| Logstash | Ships log lines to Elasticsearch; creates date-stamped indices |
+| `ode_config.json` | ODE configuration: Logstash endpoint, Kafka broker/topic, L1 detector thresholds |
+| `logs/misbehaviors.log` | JSON-lines event log; read by Logstash (local) or Filebeat (ODE) |
+| Logstash | Parses log entries and indexes to Elasticsearch |
+| Filebeat | ODE sidecar — tails the log and ships to the remote Logstash |
 | Elasticsearch | Stores events; hosts the `mbd-display` filtered alias |
 | Kibana | Dashboards and KPI panels for interactive exploration |
 | `manage_display_filter.py` | Pushes L2 filter from `thresholds.json` into ES as an alias |
 | `thresholds.json` | Editable per-type L2 display thresholds |
+| `docker-compose.yml` | Local ELK stack (Elasticsearch, Logstash, Kibana, setup) |
+| `docker-compose-ode.yml` | ODE overlay — adds Filebeat and `bsm_agent` (profile `ode`) |
 | `Makefile` | Single entry point for all common operations |
 | `replay.py` | Troubleshooting tool — animates a single vehicle's BSM movement on a map |
 
-All ELK services run in Docker (`docker-compose.yml`).  `detector.py` runs
-locally (outside Docker) and writes to `logs/`, which is volume-mounted into
-the Logstash container.
+All ELK services run in Docker.  In local mode `detector.py` runs on the host
+and writes to `logs/`, which is volume-mounted into Logstash.  In ODE mode
+`bsm_agent.py` and Filebeat run as containers alongside the agent.
 
 ---
 
@@ -76,7 +103,11 @@ the Logstash container.
 - Python 3.9+ with dependencies:
 
 ```bash
+# Local / batch mode
 pip install -r requirements.txt
+
+# ODE / streaming mode (adds confluent-kafka)
+pip install -r requirements.txt -r requirements-ode.txt
 ```
 
 `requirements.txt` includes `elasticsearch>=8,<9` and `pytest>=8.0`.
@@ -134,8 +165,8 @@ make filter
    and misbehavior type: suppressed if within 50 m **or** within 30 s of
    the last logged event (OR, not AND — a vehicle at highway speed exits
    50 m in under a second, so AND would never suppress moving vehicles).
-4. Restarting Logstash (`make ingest`) causes Filebeat to re-read the log
-   from the beginning and ship all lines to Elasticsearch.
+4. Restarting Logstash (`make ingest`) causes it to re-read the log file
+   from the beginning and index all lines to Elasticsearch.
 5. Logstash creates or appends to today's date-stamped index
    (`mbd-misbehaviors-YYYY.MM.dd`).
 6. Kibana's `mbd-misbehaviors*` data view covers all daily indices
@@ -215,6 +246,61 @@ curl -X DELETE http://localhost:9200/mbd-misbehaviors-2024.06.02
 # Re-establish the alias after deleting all indices
 make filter
 ```
+
+---
+
+## Workflow: ODE Mode (Kafka)
+
+`bsm_agent.py` subscribes to `topic.OdeBsmJson` on the ODE Kafka broker and
+processes each incoming BSM through the same detectors as the batch pipeline.
+One agent instance is deployed per RSU.  Misbehavior events are written to
+`logs/misbehaviors.log`; the Filebeat sidecar tails that file and ships events
+to the remote Logstash.
+
+### Configuration
+
+Edit `ode_config.json` before deploying:
+
+```json
+"logstash": { "url": "tcp://<logstash-host>:5044" },
+"kafka":    { "bootstrap_servers": "<kafka-host>:9092",
+              "topic": "topic.OdeBsmJson",
+              "group_id": "bsm_mbd_group" }
+```
+
+### Combined local mode (zip-file testing with Filebeat)
+
+Runs the full local ELK stack **plus** the Filebeat sidecar.  Logstash accepts
+events from both its direct file-read and the Beats input; ES deduplicates via
+`event_id` so no duplicate records appear.
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose-ode.yml up -d
+python detector.py data/tampa_BSM_2021.zip
+```
+
+### ODE production mode
+
+Filebeat ships to the remote Logstash.  `bsm_agent` starts only when the
+`ode` profile is requested.  No local ELK stack is needed.
+
+```bash
+LOGSTASH_URL=<logstash-host>:5044 \
+docker compose -f docker-compose-ode.yml --profile ode up -d
+```
+
+`bsm_agent.py` can also be run directly (outside Docker) for development:
+
+```bash
+python bsm_agent.py --config ode_config.json --log logs/misbehaviors.log
+```
+
+### State and continuity
+
+Per-vehicle detector state (position, heading history, etc.) is kept in
+process memory and is lost on restart — at most `CONFIRM_N` detections per
+vehicle are missed.  Continuity is also lost when a vehicle moves between
+RSUs; both are accepted trade-offs for this deployment model.
 
 ---
 
@@ -1004,22 +1090,26 @@ Kubernetes cluster.  In that model:
 
 **Already implemented toward ODE deployment:**
 
-- `_process_bsm(bsm: dict, …)` in `detector.py` processes a single BSM dict
-  and returns `(flagged, suppressed)`.  This is the intended ODE hook — the
-  same function the batch loop calls internally, ready to be wired to a live
-  BSM stream without any detector code changes.
-- `ode_config.json` carries the Logstash endpoint URL (`logstash.url`) so
-  each deployed agent can be pointed at the correct remote Logstash instance
-  via config without code changes.
+- `_process_bsm(bsm: dict, …)` in `detector.py` — single-BSM processing hook
+  shared by both `detector.py` (batch) and `bsm_agent.py` (streaming).
+- `bsm_agent.py` — Kafka consumer that subscribes to `topic.OdeBsmJson`,
+  normalises the ODE `wheelBrakes` format, and calls `_process_bsm()` per message.
+- `ode_config.json` — carries Logstash endpoint URL and Kafka broker/topic so
+  each deployed agent is configured without code changes.
+- `docker-compose-ode.yml` — ODE overlay with Filebeat (unconditional) and
+  `bsm_agent` (Docker Compose profile `ode`); `./logs` bind-mounted between both.
+- `Dockerfile.agent` — `python:3.12-slim` image for `bsm_agent.py`.
+- Logstash pipeline — accepts both direct file-read (local mode) and Beats
+  input (ODE mode) on port 5044; ES deduplicates via `document_id`.
 
 Key changes still required relative to the current design:
 
 | Concern | Current | Production |
 |---|---|---|
-| Input | ZIP/NDJSON file | ODE BSM stream (REST/WebSocket) |
-| Execution | Single process, one machine | Kubernetes `Deployment` with N replicas |
-| Output | JSON-lines log → Logstash | JSON-lines log → **Filebeat** → Logstash → ES |
-| State (stateful detectors) | In-process Python dict | Shared store (Redis or ES itself) |
+| Input | ZIP/NDJSON file or Kafka (`bsm_agent`) | ODE Kafka stream ✓ |
+| Execution | Single process, one machine | Kubernetes `Deployment` (one pod per RSU) |
+| Output | JSON-lines log → Filebeat → Logstash | ✓ already this path |
+| State (stateful detectors) | In-process Python dict | In-process per RSU ✓ (cross-RSU loss accepted) |
 | Index naming | `mbd-misbehaviors` | Data stream with ILM rollover policy |
 
 #### Recommended ingest path: agent → Filebeat → Logstash → ES
@@ -1038,16 +1128,16 @@ central Logstash instance.  This approach:
   sidecars fan-in to the same Logstash endpoint.
 
 ```
-ODE BSM stream
+ODE Kafka (topic.OdeBsmJson)
       │
       ▼
  Agent pod (Kubernetes)
- ┌─────────────────────────────┐
- │  detector.py → misbehaviors │
- │  .log (JSON-lines)          │
- │          │                  │
- │   Filebeat sidecar ─────────┼──► Logstash ──► Elasticsearch ──► Kibana
- └─────────────────────────────┘
+ ┌──────────────────────────────────┐
+ │  bsm_agent.py → misbehaviors.log │
+ │  (JSON-lines, one event per line) │
+ │               │                  │
+ │   Filebeat sidecar ──────────────┼──► Logstash ──► Elasticsearch ──► Kibana
+ └──────────────────────────────────┘
 ```
 
 #### Eliminating shared state with pinned routing
@@ -1099,6 +1189,65 @@ generalise this for a production deployment.
 
 ---
 
+### ODE integration: remaining work
+
+The items below are the outstanding tasks before `bsm_agent.py` is ready for
+a production ODE deployment.
+
+**Kafka TLS / SASL authentication** — the current `ode_config.json` has no
+auth config.  The ODE supports Confluent Cloud (SASL/SCRAM) and on-prem TLS.
+A `kafka.security` sub-section (`protocol`, `sasl_mechanism`, `username`,
+`password`) should be added to `ode_config.json` and wired into
+`_build_consumer()` in `bsm_agent.py`.  `confluent-kafka` supports both modes
+natively.
+
+**Kubernetes manifests** — `docker-compose-ode.yml` is a local testing
+convenience, not a production deployment artifact.  A `k8s/` directory with a
+`Deployment` (bsm_agent + Filebeat sidecar containers), `ConfigMap`
+(ode_config.json), and `emptyDir` shared volume between the two containers is
+the actual deliverable for ODE cluster integration.
+
+**Health / liveness probe** — Kubernetes needs a liveness probe to detect a
+stuck or crashed `bsm_agent`.  The simplest approach: `bsm_agent.py` writes a
+heartbeat timestamp to a file after each successful `poll()` cycle; the K8s
+`livenessProbe.exec` command checks that the file is younger than a threshold
+(e.g., 30 s).  No HTTP server required.
+
+**Tests for `bsm_agent.py`** — `_normalise_bsm()` and `_adapt_wheel_brakes()`
+have no test coverage.  A `tests/test_bsm_agent.py` covering the wheelBrakes
+adapter (dict → binary string, string passthrough, missing/malformed values)
+and the normalise path would close this gap.
+
+**RSU ID from ODE metadata** — ODE Kafka BSMs do not carry `metadata.RSUID`.
+`extract_context()` will silently produce a blank `rsu_id` in every event.
+The RSU ID should be injected from `ode_config.json` (one value per deployed
+agent) or derived from `metadata.receivedMessageDetails` and added to the
+event by `bsm_agent.py` before calling `_process_bsm()`.
+
+**Structured logging** — `bsm_agent.py` uses `print()` statements.  Replacing
+them with the Python `logging` module in JSON format would integrate cleanly
+with whatever log aggregation the ODE cluster runs (e.g., Fluentd, Loki).
+
+**Configurable Kafka consumer settings** — `auto.offset.reset` and
+`enable.auto.commit` are hardcoded in `_build_consumer()`.  Exposing them in
+`ode_config.json` under `kafka` (e.g., `auto_offset_reset`, `auto_commit`)
+avoids a code change when operations teams need different behaviour.
+
+**Dead letter queue** — messages that fail JSON parsing or raise an unexpected
+exception are currently print-and-skip.  Forwarding them to an error Kafka
+topic (e.g., `topic.MbdErrors`) would provide visibility without blocking the
+main consumer.
+
+**Prometheus metrics** — counters for BSMs processed / flagged / errors and a
+per-detector-type breakdown would make `bsm_agent.py` observable from the ODE
+cluster's monitoring stack (Prometheus + Grafana).
+
+**Log rotation** — in continuous streaming mode `misbehaviors.log` grows
+without bound.  See [Pipeline: log rotation and duplicate ingestion](#pipeline-log-rotation-and-duplicate-ingestion)
+below.
+
+---
+
 ### Detectors: coverage gaps in existing logic
 
 The current detectors flag individual BSMs in isolation or against a single
@@ -1134,10 +1283,12 @@ spoofing.
 
 ### Pipeline: log rotation and duplicate ingestion
 
-**Log rotation** — `misbehaviors.log` grows indefinitely.  On `make ingest`,
-Logstash restarts from the beginning of the file, which becomes increasingly
-slow as the log grows.  A rotation policy (e.g., daily rotation, keep 7
-files) would cap ingest time.
+**Log rotation** — `misbehaviors.log` grows indefinitely.  In batch mode this
+is manageable; in ODE streaming mode it will eventually fill the disk.  On
+`make ingest`, Logstash restarts from the beginning of the file, which becomes
+increasingly slow as the log grows.  A rotation policy (e.g., daily rotation,
+keep 7 files, via Python's `RotatingFileHandler` or a system logrotate config)
+would cap both disk usage and ingest time.
 
 **Duplicate ingestion** — running `make ingest` twice re-ingests the entire
 log, creating duplicate records in Elasticsearch.  Assigning a deterministic
@@ -1147,12 +1298,55 @@ duplicates regardless of how many times Logstash restarts.
 
 ---
 
+### Pipeline: BSM event context window
+
+The surrounding raw BSMs at the time of a misbehavior detection are essential
+for post-hoc investigation with `replay.py`.  The two deployment modes have
+different constraints:
+
+**ZIP / batch mode** — the source ZIP archive is available today and `replay.py`
+can scan it using `--time-at` and `--vehicle-id`.  However, ZIP archives may
+not be retained indefinitely once the ODE is in production, and scanning a
+large archive is slow.  Capturing context at detection time makes replay
+instant and future-proof regardless of whether the original file is still
+available.
+
+**ODE / streaming mode** — BSMs are consumed from the Kafka stream and not
+persisted anywhere outside the detector process.  Once a BSM has been
+processed it is gone.  A context window captured at detection time is the
+**only** mechanism available for post-hoc replay; there is no archive to fall
+back on.
+
+**Proposed design (common to both modes):**
+
+- Each active vehicle slot maintains a **per-vehicle ring buffer** of the last
+  N seconds of raw BSMs (e.g., 3 s ≈ 30 messages at 10 Hz), held in the same
+  in-process state as the stateful detectors.  When an event fires, the buffer
+  holds the pre-event context.
+- `_process_bsm()` continues accepting BSMs from that vehicle for a
+  configurable post-event window (e.g., 2 s) before writing.  The misbehavior
+  log entry is **delayed** until the post-window closes.
+- Pre- and post-event BSMs are written to a **separate context file**
+  `logs/context/<event_id>.json`, keeping `misbehaviors.log` and the ELK
+  pipeline unchanged.
+- The misbehavior log entry gains a `context_file` field pointing to the
+  context file so the two can be correlated.
+- `replay.py` is extended to accept `--event-id`, read the context file
+  directly, and animate the window without requiring the source ZIP archive.
+
+Window sizes (pre and post, in seconds) and ring buffer capacity would be
+configurable in `ode_config.json` under a new `context` section.
+
+---
+
 ### Pipeline: streaming ingestion
 
-The current pipeline is batch: detect from a ZIP file, write a log, restart
-Logstash.  For a live ODE deployment the detector would consume a continuous
-BSM stream and write events to ES in near-real time — eliminating the log
-file and `make ingest` step entirely.  Options include:
+The batch pipeline (detect from a ZIP file, write a log, restart Logstash) is
+now complemented by `bsm_agent.py`, which consumes `topic.OdeBsmJson` from the
+ODE Kafka broker and writes events in real time.  The Filebeat → Logstash path
+eliminates the `make ingest` step.
+
+A further option — not yet implemented — would bypass the log file entirely:
 
 - Writing directly to ES from the detector using the Python ES client
   (simplest, but couples detector code to ES).
@@ -1194,14 +1388,18 @@ is reachable would surface misconfiguration before a long detector run.
 
 ```
 MBD/
-├── detector.py                  Main entry point — reads BSMs, runs detectors; _process_bsm() is the ODE hook
+├── detector.py                  Batch entry point — reads BSM files/ZIPs; _process_bsm() is the shared ODE hook
+├── bsm_agent.py                 ODE entry point — Kafka consumer; calls _process_bsm() per BSM
 ├── replay.py                    Troubleshooting tool — animates a vehicle's BSM movement on a map
 ├── manage_display_filter.py     Pushes L2 thresholds to ES; creates mbd-display data view
-├── ode_config.json              ODE configuration: Logstash endpoint and L1 detector thresholds
+├── ode_config.json              ODE configuration: Logstash endpoint, Kafka broker/topic, L1 thresholds
 ├── thresholds.json              L2 display thresholds (editable)
 ├── Makefile                     Single entry point for all common operations
-├── requirements.txt             Python dependencies
-├── docker-compose.yml           ELK stack (Elasticsearch, Logstash, Kibana, setup)
+├── requirements.txt             Python dependencies (local / batch mode)
+├── requirements-ode.txt         Additional ODE dependencies (confluent-kafka)
+├── Dockerfile.agent             Container image for bsm_agent.py (python:3.12-slim)
+├── docker-compose.yml           Local ELK stack (Elasticsearch, Logstash, Kibana, setup)
+├── docker-compose-ode.yml       ODE overlay — Filebeat + bsm_agent (profile: ode)
 │
 ├── detectors/
 │   ├── utils.py                 J2735 constants, geometry helpers, BaseDetector
@@ -1231,9 +1429,11 @@ MBD/
 │   ├── elasticsearch/
 │   │   ├── index-template.json  Field mappings for mbd-misbehaviors-* indices
 │   │   └── display-alias.json   Initial alias definition (superseded by manage_display_filter.py)
+│   ├── filebeat/
+│   │   └── filebeat.yml              Tails misbehaviors.log; ships to ${LOGSTASH_URL:-logstash:5044}
 │   ├── logstash/
 │   │   ├── config/logstash.yml
-│   │   └── pipeline/misbehaviors.conf  Logstash pipeline: parse JSON-lines → ES
+│   │   └── pipeline/misbehaviors.conf  Logstash pipeline: file + Beats inputs → ES
 │   ├── kibana/
 │   │   ├── dashboard.ndjson      Misbehavior Report - Unfiltered dashboard
 │   │   ├── display-dashboard.ndjson
