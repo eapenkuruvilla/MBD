@@ -615,7 +615,7 @@ def main() -> None:
 
     ES_URL = args.es_url
 
-    server = HTTPServer(("localhost", args.port), ReplayHandler)
+    server = HTTPServer(("0.0.0.0", args.port), ReplayHandler)
     server.bsm_file = args.file
 
     print(f"Launcher listening on  http://localhost:{args.port}/")

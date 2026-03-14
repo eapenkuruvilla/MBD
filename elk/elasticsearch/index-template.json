@@ -7,6 +7,14 @@
       "number_of_replicas": 0
     },
     "mappings": {
+      "runtime": {
+        "replay_url": {
+          "type": "keyword",
+          "script": {
+            "source": "if (!doc['vehicle_id'].empty && !doc['record_generated_at'].empty) { emit('http://localhost:8765/replay?vehicle_id=' + doc['vehicle_id'].value + '&time_at=' + doc['record_generated_at'].value); }"
+          }
+        }
+      },
       "properties": {
         "@timestamp":          { "type": "date" },
         "detected_at":         { "type": "date" },

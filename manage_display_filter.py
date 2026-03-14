@@ -264,16 +264,18 @@ _RUNTIME_FIELD_DATA_VIEWS = ["mbd-data-view", "mbd-display-view"]
 def register_runtime_fields(kibana_url: str) -> None:
     """Add computed runtime fields to both Kibana data views."""
     for dv_id in _RUNTIME_FIELD_DATA_VIEWS:
-        path = f"/api/data_views/data_view/{dv_id}/runtime_field"
         for name, ftype, source in _RUNTIME_FIELDS:
+            rf = {"type": ftype, "script": {"source": source}}
             try:
-                _kibana_put(kibana_url, path, {
-                    "name": name,
-                    "runtimeField": {"type": ftype, "script": {"source": source}},
-                })
+                _kibana_post(kibana_url,
+                             f"/api/data_views/data_view/{dv_id}/runtime_field",
+                             {"name": name, "runtimeField": rf})
                 print(f"✓ Runtime field '{name}' registered on {dv_id}")
             except RuntimeError as exc:
-                print(f"  Warning: {exc}")
+                if "already exists" in str(exc):
+                    print(f"✓ Runtime field '{name}' already present on {dv_id}")
+                else:
+                    print(f"  Warning: {exc}")
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────

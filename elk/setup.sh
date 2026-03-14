@@ -33,6 +33,18 @@ if [ "$code" != "200" ]; then
 fi
 echo "[setup] Index template applied."
 
+# ── Patch replay_url runtime field into any existing indices ──────────────────
+# The template above covers future indices; this updates indices already on disk
+# in the persisted esdata volume (created before this runtime field existed).
+echo "[setup] Patching replay_url runtime field into existing indices..."
+cat > /tmp/runtime-field.json << 'RUNTIME_JSON'
+{"runtime":{"replay_url":{"type":"keyword","script":{"source":"if (!doc['vehicle_id'].empty && !doc['record_generated_at'].empty) { emit('http://localhost:8765/replay?vehicle_id=' + doc['vehicle_id'].value + '&time_at=' + doc['record_generated_at'].value); }"}}}}
+RUNTIME_JSON
+code=$(curl_json PUT "$ES/mbd-misbehaviors-*/_mapping" \
+  -H "Content-Type: application/json" \
+  --data-binary @/tmp/runtime-field.json)
+echo "[setup] Runtime field patch (HTTP $code): $(cat /tmp/resp.txt)"
+
 # ── Create Level-2 display-filter alias ──────────────────────────────────────
 # The alias  mbd-display  wraps mbd-misbehaviors* with the default L2 filter
 # defined in elk/elasticsearch/display-alias.json (generated from thresholds.json).

@@ -76,6 +76,21 @@ services:
         condition: service_healthy
     restart: "no"
 
+  launcher:
+    build:
+      context: .
+      dockerfile: Dockerfile.launcher
+    container_name: mbd-launcher
+    volumes:
+      - ./data:/MBD/data:ro
+      - ./logs:/MBD/logs:ro
+    ports:
+      - "8765:8765"
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   esdata:
     driver: local

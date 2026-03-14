@@ -49,6 +49,9 @@ Elasticsearch          ← Index: mbd-misbehaviors-YYYY.MM.dd
        │                        (manage_display_filter.py)
        ▼
    Kibana               ← Dashboards and KPI panels
+
+   launcher             ← Leaflet map + in-browser replay (port 8765)
+                           fetches events from Elasticsearch
 ```
 
 ### ODE / streaming mode
@@ -86,11 +89,11 @@ Elasticsearch + Kibana
 | Kibana | Dashboards and KPI panels for interactive exploration |
 | `manage_display_filter.py` | Pushes L2 filter from `thresholds.json` into ES as an alias |
 | `thresholds.json` | Editable per-type L2 display thresholds |
-| `docker-compose.yml` | Local ELK stack (Elasticsearch, Logstash, Kibana, setup) |
+| `docker-compose.yml` | Local ELK stack (Elasticsearch, Logstash, Kibana, setup, launcher) |
 | `docker-compose-ode.yml` | ODE overlay — adds Filebeat and `bsm_agent` (profile `ode`) |
 | `Makefile` | Single entry point for all common operations |
-| `launcher.py` | HTTP server (port 8765) — Leaflet map + in-browser replay |
-| `replay.py` | Standalone command-line animation tool; also used by `launcher.py` for BSM data loading |
+| `launcher.py` | HTTP server (port 8765) — Leaflet map + in-browser replay; starts automatically as a Docker service |
+| `replay.py` | Standalone command-line animation tool; data-loading functions reused by `launcher.py` |
 
 All ELK services run in Docker.  In local mode `detector.py` runs on the host
 and writes to `logs/`, which is volume-mounted into Logstash.  In ODE mode
@@ -123,7 +126,7 @@ pip install -r requirements.txt -r requirements-ode.txt
 ## Quick Start
 
 ```bash
-# 1. Start the ELK stack (first run pulls images; takes a few minutes)
+# 1. Start the ELK stack + launcher (first run pulls/builds images; takes a few minutes)
 docker compose up -d
 
 # 2. Detect misbehaviors in a BSM data file
@@ -137,6 +140,9 @@ make filter
 
 # 5. Open Kibana and select the "Misbehavior Report - Main" dashboard
 #    http://localhost:5601
+
+# 6. Open the companion map (click any dot → ▶ Replay)
+#    http://localhost:8765/map
 ```
 
 Or run all three steps at once:
@@ -691,11 +697,18 @@ misbehavior event indices, requiring a full `make fresh` to reingest data.
 
 ### Default binding
 
-The `docker-compose.yml` publishes Kibana as `"5601:5601"`, which Docker
-binds to **all network interfaces** (`0.0.0.0`).  Kibana is therefore
-reachable from any host that can reach this machine on port 5601.  With the
-Basic license there is no login prompt, so anyone who can reach the port has
-full read/write access to the dashboards.
+The `docker-compose.yml` publishes the following ports, each bound to
+**all network interfaces** (`0.0.0.0`) by default:
+
+| Port | Service | Notes |
+|---|---|---|
+| 5601 | Kibana | Full read/write access; no login prompt on Basic licence |
+| 9200 | Elasticsearch | REST API; also accessible from the host |
+| 8765 | launcher | Leaflet map and in-browser replay |
+
+Kibana is therefore reachable from any host that can reach this machine on
+port 5601.  With the Basic license there is no login prompt, so anyone who
+can reach the port has full read/write access to the dashboards.
 
 ### Restricting to localhost
 
@@ -830,6 +843,34 @@ docker compose up setup
 
 ---
 
+### Launcher
+
+```bash
+# Container status
+docker compose ps launcher
+
+# Live logs
+docker compose logs -f launcher
+
+# Rebuild the image after changing Dockerfile.launcher
+docker compose build launcher && docker compose up -d launcher
+```
+
+**Common issues:**
+
+- `Site can't be reached` on `http://localhost:8765`: check that the
+  container is running (`docker compose ps launcher`).  If it shows
+  `Restarting`, inspect logs for a Python import error.
+
+- Launcher starts but `/map` shows no dots: Elasticsearch may not yet have
+  data.  Run `make ingest` and `make filter` first, then refresh.
+
+- Wrong BSM file: the container mounts `./data` read-only.  Place the file
+  there and pass `--file` via the `command` override in `docker-compose.yml`,
+  or run `launcher.py` directly outside Docker.
+
+---
+
 ### Python detector
 
 ```bash
@@ -902,10 +943,20 @@ on different machines.
 
 **Start the server:**
 
+`launcher.py` starts automatically as the `mbd-launcher` Docker service when
+you run `docker compose up -d`.  It connects to Elasticsearch at
+`http://elasticsearch:9200` and mounts `./data` and `./logs` read-only.
+
 ```bash
-python launcher.py
-# with a non-default BSM file:
-python launcher.py --file data/tampa_BSM_2021.zip --port 8765
+# Automatic — no manual step needed:
+docker compose up -d
+# → launcher available at http://localhost:8765/map
+```
+
+To run with a non-default BSM file or port (outside Docker):
+
+```bash
+python launcher.py --file data/custom.zip --port 8765
 ```
 
 **Workflow:**
@@ -916,8 +967,10 @@ python launcher.py --file data/tampa_BSM_2021.zip --port 8765
 
 A spinner is shown in the new tab while trajectory data loads from the server.
 
-> **Note:** Kibana tooltips do not support clickable links, which is why `/map`
-> exists as a companion Leaflet page.
+> **Kibana tooltip:** each misbehavior event now shows a `replay_url` field in
+> the Street Map tooltip.  The URL is displayed as plain text (Kibana tooltips
+> do not render hyperlinks); copy-paste it into a browser tab or use `/map`
+> above for one-click replay.
 
 **Display:**
 
@@ -1446,7 +1499,8 @@ MBD/
 ├── requirements.txt             Python dependencies (local / batch mode)
 ├── requirements-ode.txt         Additional ODE dependencies (confluent-kafka)
 ├── Dockerfile.agent             Container image for bsm_agent.py (python:3.12-slim)
-├── docker-compose.yml           Local ELK stack (Elasticsearch, Logstash, Kibana, setup)
+├── Dockerfile.launcher          Container image for launcher.py (python:3.11-slim)
+├── docker-compose.yml           Local ELK stack (Elasticsearch, Logstash, Kibana, setup, launcher)
 ├── docker-compose-ode.yml       ODE overlay — Filebeat + bsm_agent (profile: ode)
 │
 ├── detectors/
@@ -1475,7 +1529,7 @@ MBD/
 │
 ├── elk/
 │   ├── elasticsearch/
-│   │   ├── index-template.json  Field mappings for mbd-misbehaviors-* indices
+│   │   ├── index-template.json  Field mappings + replay_url runtime field for mbd-misbehaviors-* indices
 │   │   └── display-alias.json   Initial alias definition (superseded by manage_display_filter.py)
 │   ├── filebeat/
 │   │   └── filebeat.yml              Tails misbehaviors.log; ships to ${LOGSTASH_URL:-logstash:5044}
