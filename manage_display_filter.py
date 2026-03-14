@@ -162,10 +162,13 @@ def push_alias(es: Elasticsearch, filter_query: dict, dry_run: bool = False) -> 
     if not hits:
         today = date.today().strftime("%Y.%m.%d")
         placeholder = f"mbd-misbehaviors-{today}"
-        es.indices.create(index=placeholder, ignore=400)
+        try:
+            es.indices.create(index=placeholder)
+        except Exception:
+            pass  # already exists — proceed
         print(f"  Created placeholder index '{placeholder}'.")
 
-    es.indices.update_aliases(body={"actions": actions})
+    es.indices.update_aliases(actions=actions)
     print(f"✓ Alias '{ALIAS_NAME}' → '{SOURCE_INDEX}' created/updated.")
 
 
@@ -247,12 +250,7 @@ _RUNTIME_FIELDS = [
         "if (doc.containsKey('accel_g') && !doc['accel_g'].empty) "
         "{ emit(Math.abs(doc['accel_g'].value)); }",
     ),
-    (
-        "diff_abs_kmh",
-        "double",
-        "if (doc.containsKey('diff_kmh') && !doc['diff_kmh'].empty) "
-        "{ emit(Math.abs(doc['diff_kmh'].value)); }",
-    ),
+    # diff_abs_kmh is stored directly by the detector; no runtime field needed.
 ]
 
 # Runtime fields must be added to both data views:

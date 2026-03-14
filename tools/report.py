@@ -2,9 +2,9 @@
 MBD daily summary report — queries Elasticsearch directly.
 
 Usage:
-    python report.py                    # last 1 day, ES on localhost:9200
-    python report.py --days 7
-    python report.py --es http://my-es-host:9200 --days 30
+    python tools/report.py                    # last 1 day, ES on localhost:9200
+    python tools/report.py --days 7
+    python tools/report.py --es http://my-es-host:9200 --days 30
 """
 
 import argparse

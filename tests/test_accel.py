@@ -14,9 +14,8 @@ def test_below_threshold_returns_none(det):
 
 
 def test_at_threshold_returns_none(det):
-    # 9.80665 m/s² (1.0 g) is not exactly representable in J2735 (1 LSB = 0.01 m/s²);
-    # round(9.80665 / 0.01) = 981 → decodes to 9.81 m/s² = 1.0003 g and would flag.
-    # Use raw 980 = 9.80 m/s² = 0.9993 g — the highest encodable value below the threshold.
+    # Threshold is 2.0 g (19.6133 m/s²). Use 9.80 m/s² (0.9993 g) — well below the
+    # threshold — to confirm values under 2.0 g are not flagged.
     assert det.check(make_bsm(accel_long_ms2=9.80)) is None
 
 

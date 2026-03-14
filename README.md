@@ -366,7 +366,7 @@ to retain all hits in the display filter by default.
 
 **Field:** `coreData.accelSet.long`
 **Unit:** 0.01 m/s² per LSB
-**Threshold:** |accel| > 1.0 g (9.81 m/s²)
+**Threshold:** |accel| > 2.0 g (19.61 m/s²)
 
 Flags BSMs reporting longitudinal acceleration or deceleration beyond the
 physical limit of tyre-road friction for a road vehicle.  Covers both
@@ -1224,13 +1224,6 @@ backwards, repeats, or jumps by a large amount without a wrap, it signals
 replayed or injected messages.  Can be implemented as a stateful check
 alongside the existing heading/position detectors.
 
-#### msgCount Discontinuity
-
-The `msgCount` field increments by 1 each transmission and wraps at 127.  A
-non-sequential jump (e.g., 42 → 99) for the same vehicle ID indicates a replay
-attack or injected message.  Similar to the message counter anomaly detector
-but targets a different field with different wrap semantics.
-
 #### BSM Frequency Anomaly
 
 SAE J2735 specifies ~10 Hz broadcast rate.  A vehicle sending 200 msg/s is
@@ -1578,6 +1571,8 @@ MBD/
 ├── replay-launcher.py                  HTTP server — Leaflet map (/map) + in-browser replay (/replay, /replay-data)
 ├── replay.py                    Standalone animation tool; data-loading functions reused by replay-launcher.py
 ├── manage_display_filter.py     Pushes L2 thresholds to ES; creates mbd-display data view
+├── tools/
+│   └── report.py                Daily summary report — queries ES for counts, top vehicles, top RSUs
 ├── ode_config.json              ODE configuration: Logstash endpoint, Kafka broker/topic, L1 thresholds
 ├── display-thresholds.json              L2 display thresholds (editable)
 ├── Makefile                     Single entry point for all common operations

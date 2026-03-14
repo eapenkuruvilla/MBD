@@ -21,7 +21,7 @@
   },
 
   "accel": {
-    "threshold_g": 2.0
+    "threshold_g": 1.0
   },
 
   "brakes": {
