@@ -1,12 +1,12 @@
 """
-launcher.py — Local HTTP server that:
+replay-launcher.py — Local HTTP server that:
   1. Serves a self-contained Leaflet map at /map (clickable dots → in-browser replay)
   2. Proxies ES misbehavior data as GeoJSON at /events
   3. Serves the in-browser replay animation at /replay
   4. Loads BSM trajectory data as JSON at /replay-data (fetched by the replay page)
 
 Usage:
-    python launcher.py [--port 8765] [--file data/tampa_BSM_2021.zip]
+    python replay-launcher.py [--port 8765] [--file data/tampa_BSM_2021.zip]
 
 Endpoints:
     GET /              health check

@@ -2,7 +2,7 @@
 #
 # Usage:
 #   make run    DATA=data/sample.zip     detect misbehaviors, append to log
-#   make filter                          push thresholds.json → ES alias
+#   make filter                          push display-thresholds.json → ES alias
 #   make ingest                          restart Logstash to ingest latest log
 #   make full   DATA=data/sample.zip     run + ingest + filter
 #   make fresh  DATA=data/sample.zip     clear ES + truncate log + full
@@ -20,7 +20,7 @@ COMPOSE ?= docker compose
 help:
 	@echo ""
 	@echo "  make run    [DATA=<file>]   Detect misbehaviors and append to log"
-	@echo "  make filter                 Push thresholds.json to ES alias"
+	@echo "  make filter                 Push display-thresholds.json to ES alias"
 	@echo "  make ingest                 Restart Logstash to ingest latest log"
 	@echo "  make full   [DATA=<file>]   run + ingest + filter"
 	@echo "  make clear                  Delete today's ES index"

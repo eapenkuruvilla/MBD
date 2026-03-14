@@ -1,6 +1,6 @@
 """manage_display_filter.py — Level-2 display filter for MBD Kibana.
 
-Reads thresholds.json and creates / replaces the Elasticsearch alias
+Reads display-thresholds.json and creates / replaces the Elasticsearch alias
 mbd-display, which acts as a server-side pre-filter on top of the raw
 mbd-misbehaviors-* indices.  Kibana is pointed at mbd-display so analysts
 see only the higher-significance slice of the dataset by default.
@@ -11,7 +11,7 @@ diff_abs_kmh) on both data views.  Run after every docker compose down -v.
 
 Workflow
 --------
-  1. Edit thresholds.json (adjust Level-2 values).
+  1. Edit display-thresholds.json (adjust Level-2 values).
   2. Run:  python manage_display_filter.py
   3. Refresh Kibana — no data re-ingestion required.
 
@@ -21,7 +21,7 @@ Usage
 
   --es-url URL         Elasticsearch URL  (default: http://localhost:9200)
   --kibana-url URL     Kibana URL         (default: http://localhost:5601)
-  --thresholds FILE    thresholds.json path (default: next to this script)
+  --thresholds FILE    display-thresholds.json path (default: next to this script)
   --show               Print the currently active alias filter and exit.
   --dry-run            Print the generated filter without pushing it.
   --setup-kibana       Also create the mbd-display Kibana data view and register
@@ -44,7 +44,7 @@ SOURCE_INDEX  = "mbd-misbehaviors*"
 DATA_VIEW_ID  = "mbd-display-view"
 DATA_VIEW_TITLE = "mbd-display"
 
-DEFAULT_THRESHOLDS = Path(__file__).with_name("thresholds.json")
+DEFAULT_THRESHOLDS = Path(__file__).with_name("display-thresholds.json")
 
 # ── Threshold loading ─────────────────────────────────────────────────────────
 
@@ -282,7 +282,7 @@ def register_runtime_fields(kibana_url: str) -> None:
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Create/update the mbd-display ES alias from thresholds.json",
+        description="Create/update the mbd-display ES alias from display-thresholds.json",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
@@ -297,7 +297,7 @@ def parse_args():
     parser.add_argument(
         "--thresholds", type=Path, default=DEFAULT_THRESHOLDS,
         metavar="FILE",
-        help="Path to thresholds.json  (default: thresholds.json next to this script)",
+        help="Path to display-thresholds.json  (default: display-thresholds.json next to this script)",
     )
     parser.add_argument(
         "--show", action="store_true",

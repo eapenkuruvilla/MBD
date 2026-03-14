@@ -20,7 +20,7 @@ anomalous behaviour, and visualises findings in Kibana.
 10. [Kibana Dashboards](#kibana-dashboards)
 11. [Network Access & Security](#network-access--security)
 12. [Troubleshooting](#troubleshooting)
-13. [Vehicle Replay Tool](#vehicle-replay-tool) — in-browser (`launcher.py`) and command-line (`replay.py`)
+13. [Vehicle Replay Tool](#vehicle-replay-tool) — in-browser (`replay-launcher.py`) and command-line (`replay.py`)
 14. [Development: Unit Tests](#development-unit-tests)
 15. [Future Work](#future-work)
 16. [Project Structure](#project-structure)
@@ -45,7 +45,7 @@ BSM data file(s)
        ▼
 Elasticsearch          ← Index: mbd-misbehaviors-YYYY.MM.dd
        │
-       ├─ mbd-display alias  ← L2 filter from thresholds.json
+       ├─ mbd-display alias  ← L2 filter from display-thresholds.json
        │                        (manage_display_filter.py)
        ▼
    Kibana               ← Dashboards and KPI panels
@@ -87,13 +87,13 @@ Elasticsearch + Kibana
 | Filebeat | ODE sidecar — tails the log and ships to the remote Logstash |
 | Elasticsearch | Stores events; hosts the `mbd-display` filtered alias |
 | Kibana | Dashboards and KPI panels for interactive exploration |
-| `manage_display_filter.py` | Pushes L2 filter from `thresholds.json` into ES as an alias |
-| `thresholds.json` | Editable per-type L2 display thresholds |
+| `manage_display_filter.py` | Pushes L2 filter from `display-thresholds.json` into ES as an alias |
+| `display-thresholds.json` | Editable per-type L2 display thresholds |
 | `docker-compose.yml` | Local ELK stack (Elasticsearch, Logstash, Kibana, setup, launcher) |
 | `docker-compose-ode.yml` | ODE overlay — adds Filebeat and `bsm_agent` (profile `ode`) |
 | `Makefile` | Single entry point for all common operations |
-| `launcher.py` | HTTP server (port 8765) — Leaflet map + in-browser replay; starts automatically as a Docker service |
-| `replay.py` | Standalone command-line animation tool; data-loading functions reused by `launcher.py` |
+| `replay-launcher.py` | HTTP server (port 8765) — Leaflet map + in-browser replay; starts automatically as a Docker service |
+| `replay.py` | Standalone command-line animation tool; data-loading functions reused by `replay-launcher.py` |
 
 All ELK services run in Docker.  In local mode `detector.py` runs on the host
 and writes to `logs/`, which is volume-mounted into Logstash.  In ODE mode
@@ -107,7 +107,7 @@ and writes to `logs/`, which is volume-mounted into Logstash.  In ODE mode
 - Python 3.9+ with dependencies:
 - **BSM data file** — the Tampa CV Pilot dataset used for testing is available
   on request from the
-  [USDOT Connected Vehicle Pilot Sandbox](https://data.transportation.gov/transportation/s/Connected-Vehicle-Pilot-Sandbox/hr8h-ufhq).
+  [Connected Vehicle Pilot (CVP) Open Data](https://data.transportation.gov/stories/s/Connected-Vehicle-Pilot-Sandbox/hr8h-ufhq).
   Place the downloaded ZIP in the `data/` directory and pass it with `DATA=`
   or `--file`.
 
@@ -164,7 +164,7 @@ make run DATA=data/new_data.zip
 # Tell Logstash to re-read the log
 make ingest
 
-# Refresh the L2 alias filter (only needed if thresholds.json changed)
+# Refresh the L2 alias filter (only needed if display-thresholds.json changed)
 make filter
 ```
 
@@ -320,7 +320,7 @@ RSUs; both are accepted trade-offs for this deployment model.
 
 ```
 make run    [DATA=<file>]   Detect misbehaviors; append to log
-make filter                 Push thresholds.json → ES display alias
+make filter                 Push display-thresholds.json → ES display alias
 make ingest                 Restart Logstash to ingest the latest log
 make full   [DATA=<file>]   run + ingest + filter
 make clear                  Delete today's ES index
@@ -550,7 +550,7 @@ The system uses two filtering levels:
 | Level | Description | Where configured |
 |---|---|---|
 | **L1** | Detector fires: the physics check failed | `ode_config.json` |
-| **L2** | Display filter: higher-confidence subset shown in Kibana | `thresholds.json` → `mbd-display` ES alias |
+| **L2** | Display filter: higher-confidence subset shown in Kibana | `display-thresholds.json` → `mbd-display` ES alias |
 
 **L1** produces all flagged events in `logs/misbehaviors.log` and in the
 raw `mbd-misbehaviors-*` indices.
@@ -561,7 +561,7 @@ higher-significance slice without re-ingesting data.
 
 ### Adjusting L2 thresholds
 
-1. Edit `thresholds.json` (values are in km/h, m, g, °, °/s as labelled).
+1. Edit `display-thresholds.json` (values are in km/h, m, g, °, °/s as labelled).
 2. Push the new filter — no data re-ingestion needed:
 
 ```bash
@@ -867,7 +867,7 @@ docker compose build launcher && docker compose up -d launcher
 
 - Wrong BSM file: the container mounts `./data` read-only.  Place the file
   there and pass `--file` via the `command` override in `docker-compose.yml`,
-  or run `launcher.py` directly outside Docker.
+  or run `replay-launcher.py` directly outside Docker.
 
 ---
 
@@ -926,9 +926,9 @@ The replay system animates a single vehicle's BSM trajectory around the time
 of a flagged misbehavior — position, heading, and speed — for visual
 inspection and investigation.
 
-### In-browser replay via `launcher.py` (recommended)
+### In-browser replay via `replay-launcher.py` (recommended)
 
-`launcher.py` is a lightweight HTTP server.  BSM data is loaded server-side;
+`replay-launcher.py` is a lightweight HTTP server.  BSM data is loaded server-side;
 the animation runs entirely in the browser, so the server and browser can be
 on different machines.
 
@@ -943,7 +943,7 @@ on different machines.
 
 **Start the server:**
 
-`launcher.py` starts automatically as the `mbd-launcher` Docker service when
+`replay-launcher.py` starts automatically as the `mbd-launcher` Docker service when
 you run `docker compose up -d`.  It connects to Elasticsearch at
 `http://elasticsearch:9200` and mounts `./data` and `./logs` read-only.
 
@@ -956,7 +956,7 @@ docker compose up -d
 To run with a non-default BSM file or port (outside Docker):
 
 ```bash
-python launcher.py --file data/custom.zip --port 8765
+python replay-launcher.py --file data/custom.zip --port 8765
 ```
 
 **Workflow:**
@@ -1119,7 +1119,7 @@ Docker images (`elasticsearch` → `opensearchproject/opensearch`,
 `kibana` → `opensearchproject/opensearch-dashboards`) and adjusting a handful
 of API paths.  Doing so would allow interactive Controls panels for the
 L2 threshold sliders directly in the dashboard, removing the need to edit
-`thresholds.json` and rerun `make filter`.
+`display-thresholds.json` and rerun `make filter`.
 
 ---
 
@@ -1490,16 +1490,16 @@ is reachable would surface misconfiguration before a long detector run.
 MBD/
 ├── detector.py                  Batch entry point — reads BSM files/ZIPs; _process_bsm() is the shared ODE hook
 ├── bsm_agent.py                 ODE entry point — Kafka consumer; calls _process_bsm() per BSM
-├── launcher.py                  HTTP server — Leaflet map (/map) + in-browser replay (/replay, /replay-data)
-├── replay.py                    Standalone animation tool; data-loading functions reused by launcher.py
+├── replay-launcher.py                  HTTP server — Leaflet map (/map) + in-browser replay (/replay, /replay-data)
+├── replay.py                    Standalone animation tool; data-loading functions reused by replay-launcher.py
 ├── manage_display_filter.py     Pushes L2 thresholds to ES; creates mbd-display data view
 ├── ode_config.json              ODE configuration: Logstash endpoint, Kafka broker/topic, L1 thresholds
-├── thresholds.json              L2 display thresholds (editable)
+├── display-thresholds.json              L2 display thresholds (editable)
 ├── Makefile                     Single entry point for all common operations
 ├── requirements.txt             Python dependencies (local / batch mode)
 ├── requirements-ode.txt         Additional ODE dependencies (confluent-kafka)
 ├── Dockerfile.agent             Container image for bsm_agent.py (python:3.12-slim)
-├── Dockerfile.launcher          Container image for launcher.py (python:3.11-slim)
+├── Dockerfile.launcher          Container image for replay-launcher.py (python:3.11-slim)
 ├── docker-compose.yml           Local ELK stack (Elasticsearch, Logstash, Kibana, setup, launcher)
 ├── docker-compose-ode.yml       ODE overlay — Filebeat + bsm_agent (profile: ode)
 │

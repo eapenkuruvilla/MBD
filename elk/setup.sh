@@ -47,8 +47,8 @@ echo "[setup] Runtime field patch (HTTP $code): $(cat /tmp/resp.txt)"
 
 # ── Create Level-2 display-filter alias ──────────────────────────────────────
 # The alias  mbd-display  wraps mbd-misbehaviors* with the default L2 filter
-# defined in elk/elasticsearch/display-alias.json (generated from thresholds.json).
-# To change thresholds later: edit thresholds.json and run manage_display_filter.py.
+# defined in elk/elasticsearch/display-alias.json (generated from display-thresholds.json).
+# To change thresholds later: edit display-thresholds.json and run manage_display_filter.py.
 echo "[setup] Creating display-filter alias  mbd-display..."
 code=$(curl_json POST "$ES/_aliases" \
   -H "Content-Type: application/json" \
@@ -130,5 +130,5 @@ echo "[setup]   Misbehavior Report - Unfiltered  — all Level-1 records"
 echo "[setup]   Misbehavior Report - Main        — Level-2 filtered view"
 echo ""
 echo "[setup] To adjust Level-2 thresholds:"
-echo "[setup]   1. Edit  thresholds.json"
+echo "[setup]   1. Edit  display-thresholds.json"
 echo "[setup]   2. Run   python manage_display_filter.py [--setup-kibana]"
