@@ -103,8 +103,8 @@ and writes to `logs/`, which is volume-mounted into Logstash.  In ODE mode
 - Docker + Docker Compose
 - Python 3.9+ with dependencies:
 - **BSM data file** — the Tampa CV Pilot dataset used for testing is available
-  on request from the USDOT Connected Vehicle Pilot Sandbox:
-  <https://data.transportation.gov/stories/s/Connected-Vehicle-Pilot-Sandbox/hr8h-ufhq>
+  on request from the
+  [USDOT Connected Vehicle Pilot Sandbox](https://data.transportation.gov/transportation/s/Connected-Vehicle-Pilot-Sandbox/hr8h-ufhq).
   Place the downloaded ZIP in the `data/` directory and pass it with `DATA=`
   or `--file`.
 
@@ -1489,9 +1489,7 @@ MBD/
 │   │   └── kpi-vega.ndjson       Vega KPI panel
 │   └── setup.sh                  One-shot setup: templates, alias, Kibana imports
 │
-├── data/                         BSM input files (not committed; request from
-│                                 https://data.transportation.gov/stories/s/
-│                                 Connected-Vehicle-Pilot-Sandbox/hr8h-ufhq)
+├── data/                         BSM input files (not committed; see Prerequisites for data access)
 ├── logs/
 │   └── misbehaviors.log          Detector output; volume-mounted into Logstash
 └── docs/
