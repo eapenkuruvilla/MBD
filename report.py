@@ -67,7 +67,7 @@ def main() -> None:
     }
     speed_aggs = es.search(
         index=INDEX, size=0, query=speed_query,
-        aggs={"stats": {"stats": {"field": "speed_mph"}}}
+        aggs={"stats": {"stats": {"field": "speed_kmh"}}}
     )["aggregations"]["stats"]
 
     # ── print report ──────────────────────────────────────────────────────────
@@ -97,9 +97,9 @@ def main() -> None:
     if speed_aggs["count"] > 0:
         print("\n--- Speed Statistics (speed_exceeded) " + "─" * 22)
         print(f"  Count  : {speed_aggs['count']}")
-        print(f"  Min    : {speed_aggs['min']:.2f} mph")
-        print(f"  Max    : {speed_aggs['max']:.2f} mph")
-        print(f"  Avg    : {speed_aggs['avg']:.2f} mph")
+        print(f"  Min    : {speed_aggs['min']:.2f} km/h")
+        print(f"  Max    : {speed_aggs['max']:.2f} km/h")
+        print(f"  Avg    : {speed_aggs['avg']:.2f} km/h")
 
     print("\n" + LINE)
 

@@ -54,7 +54,7 @@
                     {
                       "range": {
                         "jump_m": {
-                          "gte": 800
+                          "gte": 500
                         }
                       }
                     }
@@ -90,7 +90,7 @@
                     {
                       "range": {
                         "heading_rate_deg_s": {
-                          "gte": 50000
+                          "gte": 1000
                         }
                       }
                     }
@@ -111,14 +111,14 @@
                           {
                             "range": {
                               "diff_kmh": {
-                                "gte": 500
+                                "gte": 20000
                               }
                             }
                           },
                           {
                             "range": {
                               "diff_kmh": {
-                                "lte": -500
+                                "lte": -20000
                               }
                             }
                           }
@@ -158,7 +158,7 @@
                     {
                       "range": {
                         "yaw_diff_deg_s": {
-                          "gte": 50000
+                          "gte": 1000
                         }
                       }
                     }
@@ -194,7 +194,7 @@
                     {
                       "range": {
                         "accel_g": {
-                          "lte": -2.0
+                          "lte": -1.5
                         }
                       }
                     }
