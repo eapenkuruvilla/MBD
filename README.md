@@ -20,7 +20,7 @@ anomalous behaviour, and visualises findings in Kibana.
 10. [Kibana Dashboards](#kibana-dashboards)
 11. [Network Access & Security](#network-access--security)
 12. [Troubleshooting](#troubleshooting)
-13. [Vehicle Replay Tool](#vehicle-replay-tool)
+13. [Vehicle Replay Tool](#vehicle-replay-tool) — in-browser (`launcher.py`) and command-line (`replay.py`)
 14. [Development: Unit Tests](#development-unit-tests)
 15. [Future Work](#future-work)
 16. [Project Structure](#project-structure)
@@ -89,7 +89,8 @@ Elasticsearch + Kibana
 | `docker-compose.yml` | Local ELK stack (Elasticsearch, Logstash, Kibana, setup) |
 | `docker-compose-ode.yml` | ODE overlay — adds Filebeat and `bsm_agent` (profile `ode`) |
 | `Makefile` | Single entry point for all common operations |
-| `replay.py` | Troubleshooting tool — animates a single vehicle's BSM movement on a map |
+| `launcher.py` | HTTP server (port 8765) — Leaflet map + in-browser replay |
+| `replay.py` | Standalone command-line animation tool; also used by `launcher.py` for BSM data loading |
 
 All ELK services run in Docker.  In local mode `detector.py` runs on the host
 and writes to `logs/`, which is volume-mounted into Logstash.  In ODE mode
@@ -101,6 +102,11 @@ and writes to `logs/`, which is volume-mounted into Logstash.  In ODE mode
 
 - Docker + Docker Compose
 - Python 3.9+ with dependencies:
+- **BSM data file** — the Tampa CV Pilot dataset used for testing is available
+  on request from the USDOT Connected Vehicle Pilot Sandbox:
+  <https://data.transportation.gov/stories/s/Connected-Vehicle-Pilot-Sandbox/hr8h-ufhq>
+  Place the downloaded ZIP in the `data/` directory and pass it with `DATA=`
+  or `--file`.
 
 ```bash
 # Local / batch mode
@@ -875,75 +881,116 @@ docker system df -v | grep mbd
 
 ## Vehicle Replay Tool
 
-`replay.py` is a troubleshooting tool that animates a single vehicle's
-movement from the raw BSM data file.  Use it to visually inspect the position,
-heading, and speed of a flagged vehicle around the time of a misbehavior event.
+The replay system animates a single vehicle's BSM trajectory around the time
+of a flagged misbehavior — position, heading, and speed — for visual
+inspection and investigation.
 
-### Prerequisites
+### In-browser replay via `launcher.py` (recommended)
+
+`launcher.py` is a lightweight HTTP server.  BSM data is loaded server-side;
+the animation runs entirely in the browser, so the server and browser can be
+on different machines.
+
+**Endpoints:**
+
+| Endpoint | Description |
+|---|---|
+| `GET /map` | Leaflet map — misbehavior events as colour-coded dots |
+| `GET /events` | GeoJSON proxy — fetches events from Elasticsearch |
+| `GET /replay` | In-browser animated replay page (Leaflet + JavaScript) |
+| `GET /replay-data` | JSON trajectory frames consumed by the replay page |
+
+**Start the server:**
 
 ```bash
-pip install matplotlib
+python launcher.py
+# with a non-default BSM file:
+python launcher.py --file data/tampa_BSM_2021.zip --port 8765
 ```
 
-### Arguments
+**Workflow:**
+
+1. Open `http://localhost:8765/map` in a browser.
+2. Click any dot to open a popup showing vehicle ID, time, and misbehavior type.
+3. Click **▶ Replay** — a new tab opens and animates the trajectory.
+
+A spinner is shown in the new tab while trajectory data loads from the server.
+
+> **Note:** Kibana tooltips do not support clickable links, which is why `/map`
+> exists as a companion Leaflet page.
+
+**Display:**
+
+| Element | Description |
+|---|---|
+| Grey polyline | Full trajectory across the time window |
+| Red star ★ | Vehicle position at the misbehavior time |
+| Blue triangle ▲ | Current heading (0 = North, clockwise per SAE J2735) |
+| Blue trail | Last 8 positions |
+| Bottom bar | Current timestamp · Δ offset from misbehavior time · speed in km/h |
+
+**Controls:**
+
+| Control | Action |
+|---|---|
+| ⏮ Replay | Reset to start and play |
+| ⏸ Pause | Pause playback |
+| ▶ Play | Resume from current position |
+| Speed slider | Playback rate (0.05× – 2.0×) |
+
+---
+
+### Command-line replay via `replay.py`
+
+`replay.py` can also be run directly, opening a Matplotlib animation window on
+the local machine.  Useful for development or scripted use.
+
+**Prerequisites:**
+
+```bash
+pip install matplotlib contextily
+```
+
+**Arguments:**
 
 | Argument | Default | Description |
 |---|---|---|
 | `--vehicle-id` | *(required)* | Vehicle ID (`coreData.id`) |
-| `--time-at` | *(required)* | Centre time `HH:MM:SS[.mmm]` — paste the Kibana `@timestamp` directly |
+| `--time-at` | *(required)* | Centre time — paste the Kibana `@timestamp` directly |
 | `--start-offset` | `10` | Seconds before `--time-at` to include |
 | `--end-offset` | `5` | Seconds after `--time-at` to include |
-| `--speed` | `1.0` | Playback speed multiplier (`0.1` = 10× slower than real time) |
+| `--speed` | `1.0` | Playback speed multiplier (`0.1` = 10× slower) |
 | `--file` | *(required)* | BSM ZIP archive or plain NDJSON file |
-| `--log` | `logs/misbehaviors.log` | Used as a fallback if `--time-at` matches no BSMs directly |
+| `--log` | `logs/misbehaviors.log` | Fallback if `--time-at` matches no BSMs directly |
 
-### Usage
+**Usage:**
 
 ```bash
 python replay.py \
   --vehicle-id 8273834 \
-  --time-at 18:17:50.380 \
+  --time-at "2021-02-02 18:17:50.380 [ET]" \
   --start-offset 10 \
   --end-offset 5 \
   --speed 0.1 \
   --file data/tampa_BSM_2021.zip
 ```
 
-The time to pass is the Kibana `@timestamp` for the event of interest.
-`@timestamp` is mapped from `record_generated_at` (the BSM source time in ET),
-so it reflects when the vehicle broadcast the message — not when the detector
-ran.
+The `@timestamp` in Kibana maps to `record_generated_at` (BSM source time in
+ET), so it reflects when the vehicle broadcast the message, not when the
+detector ran.
 
-### Display
+If `--time-at` matches no BSM by `recordGeneratedAt`, the tool automatically
+falls back to `misbehaviors.log` and prints the resolved time.
 
-| Element | Description |
-|---|---|
-| Grey line | Full trajectory of the vehicle across the time window |
-| Red star | Vehicle position at `--time-at` |
-| Blue arrow | Heading direction (0 = North, clockwise per SAE J2735) |
-| Arrow label | Speed in km/h |
-| Blue trail | Last 8 positions |
-| Top-left | Current BSM timestamp (`HH:MM:SS.mmm`) |
-| Top-right | Offset from `--time-at` (e.g. `Δ −3.200s`) |
-
-### Kibana → replay workflow
-
-1. In the Kibana event table, click a misbehavior event for the vehicle.
-2. Copy the `@timestamp` value (e.g. `18:17:50.380`).
-3. Copy the `vehicle_id` field.
-4. Pass both to `replay.py` as `--time-at` and `--vehicle-id`.
-
-If `--time-at` does not match any BSM by `record_generated_at`, the tool
-automatically falls back to searching `misbehaviors.log` by `record_generated_at`
-and prints the resolved time before opening the animation.
+---
 
 ### ZIP search performance
 
+Both the browser and command-line paths share the same optimised BSM loader.
 The Tampa BSM ZIP encodes date and hour in each entry path
-(`tampa/BSM/YYYY/MM/DD/HH/…`).  `replay.py` reads this path to pre-filter
-entries before opening any files, reducing the number of entries scanned from
-~37 000 to the handful that cover the target hour.  The terminal shows how
-many entries were scanned:
+(`tampa/BSM/YYYY/MM/DD/HH/…`).  Only entries whose hour falls within the
+target time window are opened, reducing scanned entries from ~37 000 to the
+handful that cover the target hour:
 
 ```
 Scanning 8 ZIP entries (hour filter: {18})
@@ -1390,7 +1437,8 @@ is reachable would surface misconfiguration before a long detector run.
 MBD/
 ├── detector.py                  Batch entry point — reads BSM files/ZIPs; _process_bsm() is the shared ODE hook
 ├── bsm_agent.py                 ODE entry point — Kafka consumer; calls _process_bsm() per BSM
-├── replay.py                    Troubleshooting tool — animates a vehicle's BSM movement on a map
+├── launcher.py                  HTTP server — Leaflet map (/map) + in-browser replay (/replay, /replay-data)
+├── replay.py                    Standalone animation tool; data-loading functions reused by launcher.py
 ├── manage_display_filter.py     Pushes L2 thresholds to ES; creates mbd-display data view
 ├── ode_config.json              ODE configuration: Logstash endpoint, Kafka broker/topic, L1 thresholds
 ├── thresholds.json              L2 display thresholds (editable)
@@ -1441,7 +1489,9 @@ MBD/
 │   │   └── kpi-vega.ndjson       Vega KPI panel
 │   └── setup.sh                  One-shot setup: templates, alias, Kibana imports
 │
-├── data/                         BSM input files (not committed; add your own)
+├── data/                         BSM input files (not committed; request from
+│                                 https://data.transportation.gov/stories/s/
+│                                 Connected-Vehicle-Pilot-Sandbox/hr8h-ufhq)
 ├── logs/
 │   └── misbehaviors.log          Detector output; volume-mounted into Logstash
 └── docs/

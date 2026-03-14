@@ -9,7 +9,6 @@ WORKDIR /MBD
 
 # Install the Claude Code CLI globally
 RUN npm install -g @anthropic-ai/claude-code
-RUN pip install pytest
 
 # Set the default command to start an interactive session
 CMD ["claude"]
