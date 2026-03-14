@@ -1103,6 +1103,91 @@ bsm = make_bsm(
 
 ## Future Work
 
+### Project structure: split into `ode-agent` and `elk-server`
+
+The project currently lives in a single directory.  A cleaner split would
+separate concerns into two independently deployable components:
+
+- **`ode-agent`** — the detector pipeline and BSM agent that run alongside
+  or within the ODE host.
+- **`elk-server`** — the ELK stack configuration, Kibana dashboards,
+  `manage_display_filter.py`, and replay tools (`replay-launcher.py`,
+  `replay.py`) that run on a separate server.
+
+This separation makes it easier to deploy, version, and secure each component
+independently.
+
+---
+
+### Ingestion of zip/log files: demote to test/development tool
+
+Direct ingestion of `.zip` / `.log` files via `detector.py` and Logstash is
+useful for development and testing but is not the production data path.  The
+production path is a live BSM feed from the ODE.  The file-based ingestion
+path should be clearly labelled as a development/test facility and kept out of
+production deployment documentation.
+
+---
+
+### Dashboard: Grafana health monitoring for BSM agents and ELK
+
+Add a Grafana dashboard (backed by the existing Elasticsearch data source) that surfaces:
+
+- Per-agent heartbeat status and message throughput
+- ELK cluster health (index size, shard state, ingest lag)
+- Alerting on agent silence or indexing failures
+
+Grafana is preferred over a Kibana dashboard here because it is purpose-built
+for operational monitoring, has richer native alerting (Slack, PagerDuty, etc.),
+and is backend-agnostic — it will survive the planned OpenSearch migration
+without changes.
+
+---
+
+### Security: authentication and TLS for all exposed endpoints
+
+All endpoints accessible from the internet must be secured before production
+deployment:
+
+- Enable TLS and authentication on Kibana, Elasticsearch, and Logstash.
+- Restrict Logstash input to authenticated, encrypted connections — it is
+  particularly exposed as it accepts inbound data.  Use mutual TLS (mTLS)
+  with per-agent client certificates for the Filebeat → Logstash interface
+  rather than a shared secret key: mTLS allows individual agents to be
+  revoked without affecting others, prevents man-in-the-middle injection of
+  fake misbehavior data, and is natively supported by Filebeat.  A
+  lightweight CA (e.g. `step-ca`, `cfssl`) is needed to issue and manage
+  the certificates.
+- Restrict dashboard access (Kibana/OpenSearch Dashboards, Grafana) to
+  authorized users via RBAC.  Integrate with an existing identity provider
+  (Active Directory, OAuth2/SAML) rather than managing local users.
+- Place all dashboards and APIs behind a reverse proxy (nginx, Traefik) that
+  enforces TLS and authentication at the edge, so no dashboard or API port
+  is directly internet-facing.  For initial production deployment a simpler
+  alternative is to bind dashboards to localhost only and access them
+  remotely via SSH tunnelling (`ssh -L`).  This requires no reverse proxy or
+  certificate management, leverages existing SSH access controls, and
+  ensures dashboard ports are never exposed on the network.  The reverse
+  proxy approach can be layered on later as the team and operational
+  requirements grow.
+- Use an OpenSearch stack (Apache 2.0) to access built-in RBAC and security
+  features without a paid Elastic license (see migration item below).
+
+---
+
+### Security: network isolation and deployment architecture
+
+The ELK stack should be deployed in its own isolated network segment:
+
+- ELK components must not have any route back into the V2X / ODE network, so
+  a compromised ELK host cannot be used as a pivot point to attack the V2X
+  infrastructure.
+- The deployment architecture must not require enabling any ingress traffic
+  to the ODE.  All data flow should be ODE-agent → ELK (push), never
+  ELK → ODE (pull).
+
+---
+
 ### Platform: migrate to OpenSearch
 
 The current stack uses Elasticsearch and Kibana under the **Elastic Basic**
