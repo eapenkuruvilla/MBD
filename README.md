@@ -1247,6 +1247,16 @@ Implementation requires a spatial index (e.g., geohash bucketing) over all
 active vehicles in each time window, making it the most computationally
 intensive candidate on this list.
 
+#### Missing BSM as Misbehavior
+
+Treat the absence of expected BSMs as a detectable misbehavior event.  If a
+known vehicle (or a roadside coverage zone) goes silent for longer than a
+configurable threshold, flag the gap as a potential anomaly.  This catches
+locations where no coverage is available — such as tunnels — as well as sensor
+failures or deliberate suppression.  Implementation requires tracking
+last-seen timestamps per vehicle ID and emitting a synthetic misbehavior record
+when the silence duration exceeds the threshold.
+
 ---
 
 ### Architecture: distributed ODE deployment
