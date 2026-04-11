@@ -1259,6 +1259,27 @@ when the silence duration exceeds the threshold.
 
 ---
 
+#### Signature Validation Failure
+
+V2X messages are signed using the **Security Credential Management System
+(SCMS)**.  A BSM or other V2X message whose digital signature fails
+verification is a strong misbehavior indicator — the message may be forged,
+tampered with, or replayed from a revoked certificate.
+
+**Open questions:**
+- Does the ODE perform SCMS signature verification, and if so, does it expose
+  validation results (pass / fail / certificate status) as metadata on the
+  Kafka topic alongside the decoded payload?
+- If the ODE does not verify signatures, can verification be added as a
+  pre-processing step in `bsm_agent.py` using an available SCMS client library?
+- Should signature failures be treated as a first-class misbehavior type in
+  the existing schema, or routed to a separate high-priority alert path given
+  their severity?
+- How should certificate revocation list (CRL) / OCSP lookups be handled in a
+  deployment where the agent pod may have limited external network access?
+
+---
+
 #### Missing V2X Messages (e.g. tunnel)
 
 Beyond BSMs, the ODE receives other V2X message types (SPaT, MAP, TIM, PSM,
