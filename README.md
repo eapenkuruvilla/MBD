@@ -1259,6 +1259,24 @@ when the silence duration exceeds the threshold.
 
 ---
 
+#### Missing V2X Messages (e.g. tunnel)
+
+Beyond BSMs, the ODE receives other V2X message types (SPaT, MAP, TIM, PSM,
+etc.).  Gaps in these message streams — for example, a roadside unit in a
+tunnel that stops broadcasting SPaT or MAP data — may represent infrastructure
+failures or deliberate suppression and could be flagged as misbehavior events
+in their own right.
+
+**Open questions:**
+- Which non-BSM V2X message types flow through the ODE and are available on
+  Kafka topics?
+- What constitutes a "normal" broadcast cadence for each type, and how should
+  expected vs. observed rates be defined?
+- Should non-BSM misbehavior events share the existing `misbehaviors.log`
+  schema and Kibana dashboards, or require a separate pipeline?
+
+---
+
 ### Architecture: distributed ODE deployment
 
 The current implementation processes a single ZIP/NDJSON file on one machine.
