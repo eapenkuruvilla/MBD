@@ -1280,6 +1280,72 @@ tampered with, or replayed from a revoked certificate.
 
 ---
 
+#### Phantom / Ghost Vehicle
+
+BSMs transmitted by a fabricated vehicle identity with no corresponding
+physical vehicle.  The attacker generates plausible-looking position, speed,
+and heading data for a vehicle ID that does not exist on the road.  Detection
+approaches include cross-referencing reported positions against infrastructure
+sensor data (camera, radar, loop detector) or flagging vehicle IDs that appear
+and disappear without plausible entry/exit points.
+
+---
+
+#### Replay Attack
+
+A previously captured valid BSM — complete with a legitimate signature — is
+retransmitted at a later time or from a different location.  Distinguished
+from the "Stale / Replayed Timestamp" detector above in that the message was
+genuinely valid when first broadcast; the misbehavior lies in its reuse.
+Detection requires tracking `(vehicle_id, secMark)` pairs and flagging
+duplicates, or combining timestamp staleness with position plausibility checks.
+
+---
+
+#### Time Falsification
+
+Manipulation of the `generationTime` or `secMark` field to make a message
+appear newer or older than it is.  Can mask replay attacks, defeat
+timestamp-based detectors, or create artificial gaps in coverage.  Detection
+relies on comparing reported time against receiver wall-clock time and
+flagging messages whose timestamps diverge beyond a configurable tolerance.
+
+---
+
+#### Flooding / DoS
+
+High-rate BSM injection from one or more vehicle IDs intended to saturate
+receiver processing capacity or the ODE ingest pipeline.  Detection is a
+rate-limit check per vehicle ID (already listed under "BSM Frequency Anomaly"
+above) extended to aggregate across all vehicle IDs to catch distributed
+flooding where each individual sender stays below the per-vehicle threshold.
+
+---
+
+#### Expired Certificate
+
+An OBU that failed to rotate to a fresh pseudonym certificate continues
+broadcasting with an expired credential.  This is not necessarily a malicious
+act — it may indicate a software defect or SCMS enrollment failure — but it is
+a policy violation and a signal worth surfacing.  Detection requires access to
+certificate validity periods from the SCMS or from ODE metadata; see
+"Signature Validation Failure" above for related open questions on certificate
+status availability.
+
+---
+
+#### Encoding Bug (Malformed ASN.1 / UPER)
+
+A BSM that fails ASN.1 / UPER decoding due to an OBU software defect.  Not a
+security attack, but a data-quality misbehavior that should be logged and
+counted separately from valid messages so that defective OBU firmware versions
+can be identified and remediated.  The ODE typically drops or rejects
+malformed messages before they reach the Kafka topic; confirming whether
+rejected messages are surfaced anywhere (dead-letter topic, ODE error log) is
+a prerequisite for implementing this detector.
+
+---
+
 #### Missing V2X Messages (e.g. tunnel)
 
 Beyond BSMs, the ODE receives other V2X message types (SPaT, MAP, TIM, PSM,
