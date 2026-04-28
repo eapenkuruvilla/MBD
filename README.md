@@ -1364,6 +1364,311 @@ in their own right.
 
 ---
 
+#### Red-Light Violation
+
+A vehicle whose BSM reports a position inside or beyond an intersection stop
+line while the corresponding SPaT message for that intersection indicates a
+red phase.  Cross-referencing BSM position and speed against real-time SPaT
+data from the roadside unit (RSU) can flag vehicles that enter the
+intersection on red — either a genuine traffic violation or a falsified
+position report intended to make the vehicle appear to be somewhere it is not.
+
+**Open questions:**
+- Are SPaT messages available on a Kafka topic alongside BSMs, and do they
+  carry the intersection ID needed to correlate with a vehicle's reported
+  position?
+- What MAP (intersection geometry) data is available to define the stop-line
+  boundary and approach lanes for each signalised intersection?
+- Should this detector operate per-BSM in `bsm_agent.py` (requiring SPaT
+  state to be cached per intersection) or as a post-processing join over a
+  short time window?
+
+---
+
+#### Trajectory Anomaly Detection (Obstruction / Veering)
+
+Unsupervised clustering (e.g. DBSCAN, isolation forest) applied to short
+trajectory windows — sequences of reported position, heading, and speed —
+can detect vehicles deviating from the expected road path.  When many
+vehicles deviate in the same geographic area within a short time window,
+the pattern is consistent with a real obstruction (debris, collision,
+emergency vehicle); when only a single vehicle shows the deviation it is a
+candidate for position falsification or sensor error.  No labelled training
+data is required: the model learns normal road-following behaviour from the
+BSM stream itself and flags statistical outliers.
+
+**Open questions:**
+- What trajectory window length (number of BSMs, or elapsed time) gives the
+  best signal-to-noise ratio for obstruction vs. single-vehicle anomaly
+  classification?
+- How should the model handle expected deviations such as lane changes,
+  roundabouts, or construction zones that are already mapped?
+- Should obstruction events (multi-vehicle deviation cluster) be surfaced as
+  a separate event type from single-vehicle trajectory anomalies?
+
+---
+
+#### LSTM Motion Prediction
+
+A long short-term memory (LSTM) sequence model trained on normal BSM streams
+learns the expected next state (position, speed, heading) given a vehicle's
+recent history.  At inference time, the residual between the model's
+prediction and the reported BSM state is computed; messages whose residual
+exceeds a learned threshold are flagged as anomalous.  This approach catches
+physically implausible jumps and gradual drift that evade fixed-threshold
+detectors, and naturally adapts to different road types and speed regimes
+because the model conditions on the vehicle's own recent context.
+
+**Open questions:**
+- Should a single global model be trained across all vehicles, or per-vehicle
+  or per-road-segment models to capture local driving patterns?
+- What is the minimum BSM history length needed before predictions are
+  reliable enough to flag anomalies without excessive false positives?
+- How should the model handle legitimate high-residual events such as hard
+  braking, evasive manoeuvres, or GPS signal recovery after a tunnel?
+
+---
+
+#### Collective / Swarm Anomaly Detection
+
+Analyses the joint behaviour of all active vehicle IDs within a time-space
+window rather than each vehicle in isolation.  A coordinated pattern — all
+vehicles accelerating identically, a fleet of IDs appearing and disappearing
+in lockstep, or suspiciously uniform inter-vehicle spacing — is statistically
+improbable among independent real drivers and is a strong indicator of a
+multi-vehicle Sybil attack, coordinated replay, or a phantom vehicle farm.
+Candidate techniques include multivariate time-series anomaly detection and
+graph-based methods that model pairwise similarity across vehicle trajectories.
+
+**Open questions:**
+- What spatial and temporal window sizes are appropriate for grouping vehicles
+  into a "swarm" without merging unrelated traffic streams?
+- How should the detector distinguish a legitimate convoy (e.g. platooning
+  trucks) from a suspicious coordinated cluster?
+- Does the volume of simultaneous active vehicles in the deployment area
+  provide enough data for reliable statistical baselines?
+
+---
+
+#### Behavioural Fingerprinting / Profile Drift
+
+Builds a long-term motion profile for each vehicle ID capturing its
+characteristic speed distribution, braking patterns, acceleration envelope,
+and turning behaviour.  A lightweight model (e.g. one-class SVM, autoencoder,
+or simple statistical summary) is updated incrementally as new BSMs arrive.
+When a vehicle ID's recent behaviour diverges sharply from its own historical
+baseline — for example, a previously cautious driver suddenly exhibiting
+aggressive acceleration — it is flagged as a candidate for pseudonym hijacking,
+credential reuse across physically different vehicles, or Sybil identity
+rotation.
+
+**Open questions:**
+- V2X pseudonym certificates rotate frequently by design (privacy); how
+  should the detector link behaviour across pseudonym changes without
+  re-identifying drivers?
+- What minimum observation period is needed to establish a stable baseline
+  before drift detection is meaningful?
+- Should profile drift be treated as a standalone misbehavior or used as a
+  corroborating signal to elevate the confidence of other detectors?
+
+---
+
+#### Map-Constrained Trajectory Scoring
+
+A map-matching model scores each reported BSM position against the
+probability of reaching it from the vehicle's prior position via the
+road network — accounting for road topology, legal travel directions,
+and realistic travel time given reported speed.  Positions that score
+below a learned threshold are flagged as off-road or physically impossible
+route transitions that rule-based range checks miss (e.g. a vehicle
+teleporting across a city block while reporting a plausible speed).
+Candidate approaches include hidden Markov model (HMM) map matching and
+graph neural networks over the road network.
+
+**Open questions:**
+- Which road network data source is available in the deployment environment
+  (OpenStreetMap, HERE, a proprietary GIS layer) and how frequently is it
+  updated to reflect construction and closures?
+- How should the model handle GPS multipath error in urban canyons, which
+  can produce legitimate off-road positions without any misbehavior?
+- Can the scoring run in real time per BSM, or does it require a short
+  look-ahead buffer of consecutive positions to produce a reliable score?
+
+---
+
+#### Wrong-Way Driving
+
+Cross-references the vehicle's reported heading with the legal travel
+direction of the road segment it occupies, as defined by MAP messages or a
+road network layer.  A vehicle whose heading is opposite to the permitted
+direction of travel on a one-way segment, or is clearly misaligned with any
+adjacent lane in a divided road, is flagged.  This catches both falsified
+heading data and genuine wrong-way driving events that may warrant a safety
+alert to other road users via V2X infrastructure.
+
+**Open questions:**
+- Are MAP messages available in the deployment with sufficient lane-level
+  geometry and directionality attributes?
+- How should the detector handle legally reversible lanes, contraflow
+  construction zones, and emergency vehicle exemptions?
+- What heading tolerance (degrees of misalignment) should trigger a flag,
+  given GPS heading noise at low speeds?
+
+---
+
+#### Speed Limit Violation
+
+Compares a vehicle's reported speed against the posted speed limit for the
+road segment it occupies, sourced from MAP messages or a GIS speed-limit
+layer.  Sustained, significant exceedance (configurable margin above the
+limit) is flagged as a potential misbehavior — either the speed data is
+falsified, or the vehicle represents a genuine safety risk that may be worth
+surfacing to traffic operators.  Unlike the BSM Frequency Anomaly detector,
+this check is spatial: the same speed may be normal on a motorway and
+anomalous on a residential street.
+
+**Open questions:**
+- What data source provides reliable, up-to-date speed limits for the
+  deployment area, and how are temporary limits (school zones, work zones)
+  handled?
+- Should the detector distinguish between a brief transient (overtaking)
+  and sustained exceedance, and if so, over what time window?
+- How should the flagged event be classified — misbehavior, safety event,
+  or a separate category?
+
+---
+
+#### Geofence Violation
+
+Flags vehicles reporting positions that are physically impossible or
+operationally out-of-bounds: inside a building footprint, in a body of
+water, underground (below terrain surface without a known tunnel), or
+outside the defined coverage area of the deployment.  A simple point-in-polygon
+check against a set of exclusion zones and the operational boundary catches
+coarse position falsification that more sophisticated detectors may overlook
+if the fabricated coordinates are otherwise internally consistent.
+
+**Open questions:**
+- What geospatial layers are available for building footprints, water bodies,
+  and terrain in the deployment area, and how are they kept current?
+- Should known tunnels, parking garages, and ferry routes be explicitly
+  whitelisted to avoid false positives for vehicles that legitimately pass
+  through or over water?
+- What should the operational boundary be — the city boundary, the RSU
+  coverage footprint, or a configurable polygon?
+
+---
+
+#### Implausible Vehicle Dimensions
+
+BSMs carry self-reported vehicle length and width fields.  This detector
+flags two classes of anomaly: (1) dimensions that change between consecutive
+BSMs from the same vehicle, which should never occur for a physical vehicle;
+and (2) dimensions that are inconsistent with the vehicle's stated class
+(e.g., a vehicle broadcasting a motorcycle class code but reporting
+truck-scale dimensions, or values outside the physically plausible range
+for any road vehicle).
+
+**Open questions:**
+- Are the length and width fields reliably populated in the BSMs from the
+  ODE deployment, or are they frequently absent or set to default/zero?
+- What tolerance should be applied to dimension comparisons given that
+  different OBU firmware versions may quantise the fields differently?
+- Should mismatched class-vs-dimension combinations be treated as a
+  misbehavior or as a data-quality issue attributed to OBU misconfiguration?
+
+---
+
+#### Contradictory Event Flags
+
+BSMs contain a set of event flags (hard braking, stability control active,
+hazard lights on, airbag deployed, etc.) that should be consistent with the
+reported kinematic state.  This detector checks for logical contradictions:
+an airbag-deployed flag set while speed and position are completely normal
+across subsequent messages; hard-braking flagged while speed is increasing;
+or hazard lights reported on a vehicle whose trajectory shows no slowdown
+or stop.  These contradictions may indicate flag injection, firmware bugs,
+or deliberate falsification of safety-critical event data.
+
+Note: the wheel-brake flag vs. longitudinal acceleration case is already
+implemented as `brakes_on_no_decel` / `decel_no_brakes` (detector #3).
+This entry covers the remaining event flags not yet handled.
+
+**Open questions:**
+- Which event flag / kinematic combinations can be checked reliably without
+  access to vehicle-internal state (e.g., airbag deployment does not
+  necessarily stop a vehicle immediately)?
+- Should contradictory flags generate a misbehavior alert or a lower-severity
+  data-quality warning, given the possibility of OBU firmware defects?
+- Are event flags consistently populated across the OBU hardware types in
+  the deployment, or are some flags always zero?
+
+---
+
+#### Elevation Falsification
+
+If BSMs include an altitude field, the reported elevation is cross-checked
+against a digital elevation model (DEM) for the reported lat/lon.  A vehicle
+claiming an altitude that is significantly above or below the known terrain
+surface — and not explained by a mapped structure such as a bridge, overpass,
+or tunnel — is flagged as a likely position spoof.  Elevation is a dimension
+of position that attackers frequently overlook when fabricating plausible
+lat/lon coordinates, making it a useful low-cost consistency check.
+
+**Open questions:**
+- Is the altitude field reliably populated in the BSMs from the ODE
+  deployment, and what vertical datum and precision does it use?
+- What DEM resolution and source (SRTM, lidar-derived, national mapping
+  agency) is available for the deployment area, and how are bridges and
+  elevated structures represented?
+- What vertical tolerance should be applied to account for GPS altitude
+  error, which is typically larger than horizontal error?
+
+---
+
+#### Infrastructure Impersonation
+
+Detects messages that purport to originate from a roadside unit (RSU) or
+other fixed infrastructure node but are inconsistent with the known RSU
+registry — for example, a SPaT or MAP message sourced from a position that
+does not match any registered RSU location, or from a source whose position
+changes over time (indicating a mobile transmitter).  Infrastructure
+impersonation can be used to inject false signal phase data, redirect
+vehicles, or suppress legitimate RSU broadcasts.
+
+**Open questions:**
+- Is a registry of known RSU positions and IDs available and maintainable
+  for the deployment area?
+- Does the ODE expose the source RSU ID and position metadata alongside
+  decoded SPaT/MAP messages on the Kafka topic?
+- Should moving sources be flagged immediately, or only after a position
+  drift threshold is exceeded to tolerate minor GPS error in stationary RSUs?
+
+---
+
+#### Sensor Fusion Cross-Validation
+
+Where roadside cameras, radar, lidar, or inductive loop detectors are
+available, their observations can be used to independently validate
+BSM-reported position and speed.  A vehicle whose BSM claims a position
+or speed that is inconsistent with what infrastructure sensors observe at
+the same time and location is a strong candidate for data falsification.
+This is the highest-confidence form of misbehavior detection available
+because it grounds V2X data in independent physical measurements, but it
+is also the most infrastructure-intensive to deploy.
+
+**Open questions:**
+- Which roadside sensor types are present in the deployment area, and do
+  they produce real-time data streams accessible to the MBD pipeline?
+- How are sensor observations correlated with vehicle IDs across modalities
+  (camera track ID, loop detector count) when sensors do not natively
+  identify individual vehicles?
+- What latency and positional uncertainty does each sensor type introduce,
+  and how should the fusion logic handle asynchronous or missing sensor
+  readings?
+
+---
+
 ### Architecture: distributed ODE deployment
 
 The current implementation processes a single ZIP/NDJSON file on one machine.
