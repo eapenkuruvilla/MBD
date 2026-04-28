@@ -1669,6 +1669,48 @@ is also the most infrastructure-intensive to deploy.
 
 ---
 
+### Reporting: distinguishing systemic errors from attacks
+
+A firmware bug producing slightly wrong headings is individually
+indistinguishable from a spoofing attack at any single receiver.  The
+difference only becomes visible in aggregate:
+
+- A **bug** produces the same anomaly pattern across many vehicles of the
+  same make, model, or firmware version, spread geographically, with no
+  correlation to time of day or traffic conditions.
+- An **attack** tends to be localised in space and time, targeting specific
+  corridors or events.
+
+Without a centralised reporting layer accumulating observations across
+receivers and vehicles, this population-level pattern is never visible.
+Every receiver silently filters the bad messages, the bug goes undetected
+and unpatched indefinitely, and safety-critical applications continue to
+receive corrupted data from the entire affected fleet.
+
+This distinction also determines the correct response.  A bug affecting
+tens of thousands of vehicles should trigger a manufacturer notification
+and an OTA firmware update — not tens of thousands of certificate
+revocations.  Getting that response right requires the MBD authority to
+see the population-level picture, which only exists if receivers report
+anomalies rather than just filter them locally.
+
+Systemic errors are therefore the clearest argument for the reporting
+layer: local filtering is a receiver-side defence that actively *hides*
+fleet-wide problems from the people who need to act on them.
+
+**Open questions:**
+- What attributes should be captured in a misbehavior report to enable
+  population-level analysis — firmware version, OBU model, geographic
+  cluster, anomaly type distribution?
+- What statistical tests (e.g. clustering by make/model, spatial vs.
+  temporal correlation) should the MBD authority apply to distinguish a
+  systemic error from a coordinated attack?
+- How should the pipeline handle the transition from "possible bug" to
+  "confirmed attack" if the same anomaly pattern later becomes spatially
+  concentrated, suggesting the initial spread was cover?
+
+---
+
 ### Architecture: distributed ODE deployment
 
 The current implementation processes a single ZIP/NDJSON file on one machine.
