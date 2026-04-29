@@ -68,7 +68,7 @@ services:
       - ./elk/kibana/dashboard.ndjson:/setup/dashboard.ndjson:ro
       - ./elk/kibana/display-filter.ndjson:/setup/display-filter.ndjson:ro
       - ./elk/kibana/display-dashboard.ndjson:/setup/display-dashboard.ndjson:ro
-    entrypoint: ["sh", "/setup/setup.sh"]
+    entrypoint: ["sh", "-c", "sed 's/\\r//' /setup/setup.sh > /tmp/setup.sh && sh /tmp/setup.sh"]
     depends_on:
       elasticsearch:
         condition: service_healthy
