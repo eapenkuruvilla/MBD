@@ -14,6 +14,7 @@ LOG     ?= logs/misbehaviors.log
 ES      ?= http://localhost:9200
 KIBANA  ?= http://localhost:5601
 COMPOSE ?= docker compose
+PYTHON  ?= venv/bin/python3
 
 .PHONY: run filter ingest full clear fresh test help
 
@@ -30,10 +31,10 @@ help:
 	@echo "  DATA defaults to the first file found in data/"
 
 run:
-	python detector.py "$(DATA)" --log "$(LOG)"
+	$(PYTHON) detector.py "$(DATA)" --log "$(LOG)"
 
 filter:
-	python manage_display_filter.py --es-url $(ES) --kibana-url $(KIBANA) --setup-kibana
+	$(PYTHON) manage_display_filter.py --es-url $(ES) --kibana-url $(KIBANA) --setup-kibana
 
 ingest:
 	$(COMPOSE) restart logstash
@@ -47,9 +48,9 @@ clear:
 	if [ "$$CODE" = "200" ]; then echo "deleted"; else echo "not found ($$CODE)"; fi
 
 fresh: clear
-	python detector.py "$(DATA)" --log "$(LOG)" --clear
+	$(PYTHON) detector.py "$(DATA)" --log "$(LOG)" --clear
 	$(COMPOSE) restart logstash
-	python manage_display_filter.py --es-url $(ES) --kibana-url $(KIBANA) --setup-kibana
+	$(PYTHON) manage_display_filter.py --es-url $(ES) --kibana-url $(KIBANA) --setup-kibana
 
 test:
-	python -m pytest tests/ -v
+	$(PYTHON) -m pytest tests/ -v
