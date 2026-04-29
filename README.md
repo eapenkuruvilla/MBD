@@ -112,14 +112,19 @@ and writes to `logs/`, which is volume-mounted into Logstash.  In ODE mode
   or `--file`.
 
 ```bash
+# Create and populate the virtual environment (required before running make)
+python3 -m venv venv
+
 # Local / batch mode
-pip install -r requirements.txt
+venv/bin/pip install -r requirements.txt
 
 # ODE / streaming mode (adds confluent-kafka)
-pip install -r requirements.txt -r requirements-ode.txt
+venv/bin/pip install -r requirements.txt -r requirements-ode.txt
 ```
 
 `requirements.txt` includes `elasticsearch>=8,<9` and `pytest>=8.0`.
+The Makefile uses `venv/bin/python3` directly, so the venv does not need
+to be activated before running `make`.
 
 ---
 
@@ -751,6 +756,30 @@ the firewall is blocking the port.
 ---
 
 ## Troubleshooting
+
+### WSL: `PermissionError` on `logs/misbehaviors.log`
+
+On WSL, the `logs/` directory can end up owned by `root` if it was first
+created by a Docker container (e.g. Logstash).  `make run` then fails with:
+
+```
+PermissionError: [Errno 13] Permission denied: 'logs/misbehaviors.log'
+```
+
+Fix: delete the directory and let `detector.py` recreate it as your user:
+
+```bash
+rm -rf logs/
+make run DATA=<your-file>
+```
+
+Alternatively, take ownership without deleting existing logs:
+
+```bash
+sudo chown -R $USER logs/
+```
+
+---
 
 ### Elasticsearch
 
